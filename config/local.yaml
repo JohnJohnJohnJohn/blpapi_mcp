@@ -1,0 +1,113 @@
+# Bloomberg MCP Gateway — local deployment override.
+#
+# This file tailors the gateway for THIS workstation so it is reachable over
+# the Tailscale network without Tailscale Serve. It is selected via
+# BLOOMBERG_MCP_CONFIG=config/local.yaml (see .env). The shared
+# config/default.yaml stays loopback-only per the spec.
+#
+# Trust model: every device inside the tailnet is trusted. The bearer token
+# still gates all data endpoints, so reachability alone grants nothing.
+# NOTE: binding to 0.0.0.0 also exposes the port on non-Tailscale interfaces
+# (e.g. the corporate LAN). If that is not acceptable, set host to the node's
+# Tailscale IP (currently 100.77.231.91) instead.
+
+backend: "native"   # native | fake
+
+server:
+  host: "0.0.0.0"            # listen on all interfaces so the tailnet can reach us
+  port: 8765                 # normally overridden by BLOOMBERG_MCP_PORT (8775) in .env
+  mcp_path: "/mcp"
+  protocol_revision: "2026-07-28"
+  stateless: true
+  max_request_body_bytes: 1048576
+  shutdown_timeout_seconds: 30
+  # DNS-rebinding protection: allow the loopback names plus the tailnet-reachable
+  # names/addresses of this node (short MagicDNS, full MagicDNS, Tailscale IP).
+  allowed_hosts:
+    - "127.0.0.1:*"
+    - "localhost:*"
+    - "[::1]:*"
+    - "zhua8634-hppc:*"
+    - "zhua8634-hppc.donkey-ruffe.ts.net:*"
+    - "100.77.231.91:*"
+  allowed_origins:
+    - "http://127.0.0.1:*"
+    - "http://localhost:*"
+    - "http://zhua8634-hppc:*"
+    - "http://zhua8634-hppc.donkey-ruffe.ts.net:*"
+    - "http://100.77.231.91:*"
+  artifact_endpoint_enabled: false
+  metrics_endpoint_enabled: true
+
+bloomberg:
+  host: "127.0.0.1"
+  port: 8194
+  connect_timeout_seconds: 10
+  automatic_request_replay: false
+  reconnect:
+    enabled: true
+    initial_delay_seconds: 1
+    maximum_delay_seconds: 60
+    multiplier: 2
+    jitter: 0.2
+  startup_services:
+    - "//blp/refdata"
+    - "//blp/mktdata"
+    - "//blp/instruments"
+    - "//blp/apiflds"
+
+requests:
+  max_concurrent: 4
+  max_queued: 50
+  default_wait_seconds: 30
+  maximum_wait_seconds: 60
+  default_deadline_seconds: 120
+  maximum_deadline_seconds: 300
+  deduplication_window_seconds: 300
+  maximum_response_bytes: 268435456
+  inline_result_bytes: 1048576
+  result_ttl_seconds: 86400
+
+subscriptions:
+  maximum_per_principal: 20
+  maximum_topics_per_group: 100
+  maximum_fields_per_topic: 50
+  maximum_buffered_events: 10000
+  maximum_ttl_seconds: 86400
+  default_ttl_seconds: 3600
+  maximum_long_poll_seconds: 15
+  maximum_concurrent_long_polls: 10
+  restore_after_reconnect: true
+
+storage:
+  enabled: true
+  directory: "%LOCALAPPDATA%\\BloombergMCP\\data"
+  maximum_total_bytes: 10737418240
+  cleanup_interval_seconds: 300
+  default_canonical_format: "jsonl"
+  default_tabular_format: "parquet"
+
+auth:
+  profile: "private-static-bearer"
+  mcp_oauth_compliant: false
+  token_source: "env"     # env | file | windows_credential_manager
+  token_file: ""
+  credential_target: "BloombergMCP/bearer"
+  token_overlap_seconds: 3600
+
+governance:
+  daily_request_budget: 10000
+  monthly_request_budget: 200000
+  entitlement_failure_circuit_threshold: 5
+  persist_usage_counters: true
+  persist_result_artifacts: true
+
+audit:
+  enabled: true
+  include_security_names: false
+  include_field_names: true
+  include_parameters: false
+
+logging:
+  level: "INFO"
+  json: true

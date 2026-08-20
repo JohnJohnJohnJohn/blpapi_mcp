@@ -78,7 +78,27 @@ interactive foreground run, `Ctrl+C` also performs a graceful shutdown.
 Stopping is always safe: all writes are atomic and no state requires a
 graceful flush.
 
-## 5. Tailscale Serve
+## 5. Tailscale access
+
+Two supported modes:
+
+### A. Simple tailnet HTTP (this workstation's current mode)
+
+`config/local.yaml` binds the gateway to `0.0.0.0` and allow-lists this
+node's tailnet names in the Host/Origin validation; `.env` selects it via
+`BLOOMBERG_MCP_CONFIG=config/local.yaml`. Tailnet devices then reach it
+directly at:
+
+```
+http://zhua8634-hppc:8775/mcp
+```
+
+Trust model: every tailnet device is trusted with *reachability*; the bearer
+token still gates all data endpoints. Caveat: `0.0.0.0` also exposes the port
+on non-Tailscale interfaces (e.g. corporate LAN). To restrict to the tailnet
+only, set `server.host` in `local.yaml` to the node's Tailscale IP instead.
+
+### B. Tailscale Serve (HTTPS, SPEC §4.12)
 
 ```powershell
 .\scripts\configure-tailscale.ps1

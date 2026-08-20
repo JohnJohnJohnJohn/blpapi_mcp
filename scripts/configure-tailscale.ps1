@@ -34,22 +34,26 @@ if (-not $ts) {
     exit 1
 }
 
-function Run([string[]]$args) {
+function Run([string[]]$CmdArgs) {
     if ($WhatIf) {
-        Write-Host "WOULD RUN: tailscale $($args -join ' ')"
+        Write-Host "WOULD RUN: tailscale $($CmdArgs -join ' ')"
     } else {
-        & tailscale @args
-        if ($LASTEXITCODE -ne 0) { throw "tailscale $($args -join ' ') failed ($LASTEXITCODE)" }
+        & tailscale @CmdArgs
+        if ($LASTEXITCODE -ne 0) { throw "tailscale $($CmdArgs -join ' ') failed ($LASTEXITCODE)" }
     }
 }
 
 Write-Host "== Tailscale status =="
 & tailscale status | Select-Object -First 5
 
-# Ensure HTTPS certificates are enabled for the tailnet.
+# HTTPS certificates are managed by the tailnet admin console. Some builds
+# also expose `tailscale set --https`; try it best-effort but do not fail if
+# this build has no such flag — `tailscale serve --https` provisions certs.
 Write-Host ""
-Write-Host "Ensuring HTTPS is enabled..."
-Run @("set", "--https=true")
+Write-Host "Enabling HTTPS (best-effort)..."
+try { Run @("set", "--https=true") } catch {
+    Write-Host "  (skipped: this tailscale build has no 'set --https' flag; serve will handle certs)"
+}
 
 # Configure Serve: tailnet-only HTTPS -> http://127.0.0.1:$BackendPort
 Write-Host ""
