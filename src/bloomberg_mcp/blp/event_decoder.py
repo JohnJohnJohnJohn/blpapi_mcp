@@ -89,9 +89,11 @@ def decode_element(element: blpapi.Element, *, typed: bool) -> Any:
     if count == 0:
         return None
     if count == 1:
-        # A scalar with one value cannot be null here — null scalars have
-        # numValues() == 0 and were handled above. (isNullValue(position)
-        # indexes sub-elements, not values, and raises on scalars.)
+        # A single value may still be null (e.g. an unset boolean/enum field);
+        # blpapi exposes that via Element.isNull(), not isNullValue(position)
+        # which indexes sub-elements and raises on scalars.
+        if element.isNull():
+            return None
         return _decode_scalar(element, 0, datatype, typed=typed)
     decoded: list[Any] = []
     for index in range(count):
