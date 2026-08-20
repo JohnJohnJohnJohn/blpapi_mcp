@@ -62,6 +62,26 @@ services:
     discover: true
     subscriptions: true
 
+  "//blp/news":
+    open: true
+    discover: true
+    operations:
+      "*":
+        discover: true
+        execute: false
+      "NewsSearchRequest":
+        execute: true
+        required_scope: "bloomberg:generic-request"
+      "NewsStoryRequest":
+        execute: true
+        required_scope: "bloomberg:generic-request"
+      "NewsIntradayRequest":
+        execute: true
+        required_scope: "bloomberg:generic-request"
+      "NewsHeadlineRequest":
+        execute: true
+        required_scope: "bloomberg:generic-request"
+
 defaults:
   deny_unconfigured_services: true
   deny_unconfigured_operations: true
