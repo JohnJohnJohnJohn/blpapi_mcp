@@ -89,6 +89,8 @@ def decode_element(element: blpapi.Element, *, typed: bool) -> Any:
     if count == 0:
         return None
     if count == 1:
+        if element.isNullValue(0):
+            return None
         return _decode_scalar(element, 0, datatype, typed=typed)
     decoded: list[Any] = []
     for index in range(count):
