@@ -84,19 +84,24 @@ Two supported modes:
 
 ### A. Simple tailnet HTTP (this workstation's current mode)
 
-`config/local.yaml` binds the gateway to `0.0.0.0` and allow-lists this
-node's tailnet names in the Host/Origin validation; `.env` selects it via
-`BLOOMBERG_MCP_CONFIG=config/local.yaml`. Tailnet devices then reach it
-directly at:
+`config/local.yaml` sets `server.host: "tailscale"`: at startup the gateway
+resolves the node's current Tailscale IPv4 (`tailscale ip -4`) and binds to
+**that interface only** — reachable from the tailnet, not from the corporate
+LAN, and the bind tracks the reassignable Tailscale address across restarts
+(no hardcoded IP). `.env` selects the config via
+`BLOOMBERG_MCP_CONFIG=config/local.yaml`. Tailnet devices reach it at:
 
 ```
 http://zhua8634-hppc:8775/mcp
 ```
 
+Use the stable MagicDNS name rather than the raw IP: the name never changes
+even if the Tailscale IP is reassigned. Note this mode has no loopback
+listener — local health checks also go through the machine name
+(`scripts\health-check.ps1` does this automatically).
+
 Trust model: every tailnet device is trusted with *reachability*; the bearer
-token still gates all data endpoints. Caveat: `0.0.0.0` also exposes the port
-on non-Tailscale interfaces (e.g. corporate LAN). To restrict to the tailnet
-only, set `server.host` in `local.yaml` to the node's Tailscale IP instead.
+token still gates all data endpoints.
 
 ### B. Tailscale Serve (HTTPS, SPEC §4.12)
 

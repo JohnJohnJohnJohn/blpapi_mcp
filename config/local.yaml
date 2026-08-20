@@ -5,37 +5,38 @@
 # BLOOMBERG_MCP_CONFIG=config/local.yaml (see .env). The shared
 # config/default.yaml stays loopback-only per the spec.
 #
-# Trust model: every device inside the tailnet is trusted. The bearer token
-# still gates all data endpoints, so reachability alone grants nothing.
-# NOTE: binding to 0.0.0.0 also exposes the port on non-Tailscale interfaces
-# (e.g. the corporate LAN). If that is not acceptable, set host to the node's
-# Tailscale IP (currently 100.77.231.91) instead.
+# Binding: host "tailscale" resolves the node's current Tailscale IPv4 at
+# startup (tailscale ip -4) and binds to that interface only — so the gateway
+# is reachable from the tailnet but NOT from the corporate LAN, and the bind
+# tracks the (reassignable) Tailscale address across restarts. Clients should
+# use the stable MagicDNS name: http://zhua8634-hppc:8775/mcp
+#
+# Trust model: every device inside the tailnet is trusted with reachability;
+# the bearer token still gates all data endpoints.
 
 backend: "native"   # native | fake
 
 server:
-  host: "0.0.0.0"            # listen on all interfaces so the tailnet can reach us
+  host: "tailscale"          # sentinel -> resolve & bind to the Tailscale IPv4
   port: 8765                 # normally overridden by BLOOMBERG_MCP_PORT (8775) in .env
   mcp_path: "/mcp"
   protocol_revision: "2026-07-28"
   stateless: true
   max_request_body_bytes: 1048576
   shutdown_timeout_seconds: 30
-  # DNS-rebinding protection: allow the loopback names plus the tailnet-reachable
-  # names/addresses of this node (short MagicDNS, full MagicDNS, Tailscale IP).
+  # DNS-rebinding protection: allow loopback plus the stable tailnet names of
+  # this node. The current Tailscale IP is added automatically at startup.
   allowed_hosts:
     - "127.0.0.1:*"
     - "localhost:*"
     - "[::1]:*"
     - "zhua8634-hppc:*"
     - "zhua8634-hppc.donkey-ruffe.ts.net:*"
-    - "100.77.231.91:*"
   allowed_origins:
     - "http://127.0.0.1:*"
     - "http://localhost:*"
     - "http://zhua8634-hppc:*"
     - "http://zhua8634-hppc.donkey-ruffe.ts.net:*"
-    - "http://100.77.231.91:*"
   artifact_endpoint_enabled: false
   metrics_endpoint_enabled: true
 

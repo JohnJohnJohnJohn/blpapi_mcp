@@ -27,6 +27,11 @@ from bloomberg_mcp.policy.models import load_policy_config
 
 logger = logging.getLogger("bloomberg_mcp")
 
+#: Sentinel for ``server.host``: bind to this node's Tailscale interface only.
+#: The Tailscale IPv4 is resolved at startup via ``tailscale ip -4`` so the
+#: binding tracks the (reassignable) Tailscale address across restarts.
+TAILSCALE_HOST = "tailscale"
+
 
 def _configure_logging(config: GatewayConfig) -> None:
     root = logging.getLogger("bloomberg_mcp")
@@ -89,6 +94,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.port:
         config = _with_server(config, host=config.server.host, port=args.port)
 
+    config = _apply_bind_host(config)
+
     _configure_logging(config)
 
     if not _port_available(config.server.host, config.server.port):
@@ -147,6 +154,56 @@ def _with_server(config: GatewayConfig, *, host: str, port: int | None) -> Gatew
     from dataclasses import replace
 
     server = replace(config.server, host=host, port=port if port is not None else config.server.port)
+    return replace(config, server=server)
+
+
+def _resolve_tailscale_ip() -> str | None:
+    """Return this node's current Tailscale IPv4 address, or None.
+
+    The address is reassignable, so it is resolved at startup rather than
+    hardcoded. Requires the ``tailscale`` CLI on PATH and a running backend.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("tailscale") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["tailscale", "ip", "-4"],  # noqa: S607 - resolved via PATH, vetted by shutil.which above
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    ip = result.stdout.strip()
+    return ip or None
+
+
+def _apply_bind_host(config: GatewayConfig) -> GatewayConfig:
+    """Resolve the ``tailscale`` bind-host sentinel to the node's Tailscale IP.
+
+    Binds to the Tailscale interface only (not the LAN) and allow-lists the
+    resolved address for Host validation so both hostname and raw-IP access
+    pass the DNS-rebinding check. Exits with an error if it cannot resolve.
+    """
+    from dataclasses import replace
+
+    if config.server.host != TAILSCALE_HOST:
+        return config
+    ip = _resolve_tailscale_ip()
+    if not ip:
+        print(
+            "error: server.host is 'tailscale' but the Tailscale IPv4 could not be resolved.\n"
+            "Is Tailscale running and logged in? Check with:  tailscale ip -4",
+            file=sys.stderr,
+        )
+        raise SystemExit(4)
+    allowed = tuple(config.server.allowed_hosts) + (f"{ip}:*",)
+    server = replace(config.server, host=ip, allowed_hosts=allowed)
     return replace(config, server=server)
 
 

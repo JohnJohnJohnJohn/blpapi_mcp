@@ -15,8 +15,7 @@ Follow this document to connect, authenticate, choose tools, and handle errors.
 |---|---|
 | Transport | Streamable HTTP (stateless, one POST per request) |
 | MCP protocol revision | `2026-07-28` |
-| Endpoint (over Tailscale, this deployment) | `http://zhua8634-hppc:8775/mcp` |
-| Endpoint (on the workstation) | `http://127.0.0.1:8775/mcp` |
+| Endpoint (from any tailnet device) | `http://zhua8634-hppc:8775/mcp` |
 | Auth | `Authorization: Bearer <token>` header |
 
 - There are **no sessions**: every call is self-contained. Do not try to reuse a

@@ -29,7 +29,12 @@ function Get-ConfiguredPort {
 }
 
 if (-not $BaseUrl) {
-    $BaseUrl = "http://127.0.0.1:$(Get-ConfiguredPort)"
+    # Default to the machine name: it resolves to the node's addresses
+    # (including the Tailscale interface), so it works whether the gateway
+    # binds to loopback, 0.0.0.0 or the Tailscale IP only.
+    $name = Read-DotEnv "BLOOMBERG_MCP_PUBLIC_HOST"
+    if (-not $name) { $name = $env:COMPUTERNAME.ToLower() }
+    $BaseUrl = "http://${name}:$(Get-ConfiguredPort)"
 }
 Write-Host "target: $BaseUrl"
 
