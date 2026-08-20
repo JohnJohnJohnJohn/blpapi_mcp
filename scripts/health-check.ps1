@@ -1,11 +1,41 @@
 # health-check.ps1 — liveness (unauthenticated) and readiness (authenticated).
+#
+# The port defaults to BLOOMBERG_MCP_PORT from the environment or the repo
+# .env file (falling back to 8765), so it matches however run.ps1 starts.
 
 param(
-    [string]$BaseUrl = "http://127.0.0.1:8765",
+    [string]$BaseUrl = "",
     [string]$Token = $env:BLOOMBERG_MCP_BEARER_TOKEN
 )
 
 $ErrorActionPreference = "Stop"
+
+function Read-DotEnv([string]$Key) {
+    $existing = [Environment]::GetEnvironmentVariable($Key)
+    if ($existing) { return $existing }
+    $envFile = Join-Path (Split-Path -Parent $PSScriptRoot) ".env"
+    if (Test-Path $envFile) {
+        foreach ($line in Get-Content $envFile) {
+            if ($line -match "^\s*$Key\s*=\s*(.+)$") { return $Matches[1].Trim() }
+        }
+    }
+    return $null
+}
+
+function Get-ConfiguredPort {
+    $fromEnv = Read-DotEnv "BLOOMBERG_MCP_PORT"
+    if ($fromEnv) { return [int]$fromEnv }
+    return 8765
+}
+
+if (-not $BaseUrl) {
+    $BaseUrl = "http://127.0.0.1:$(Get-ConfiguredPort)"
+}
+Write-Host "target: $BaseUrl"
+
+if (-not $Token) {
+    $Token = Read-DotEnv "BLOOMBERG_MCP_BEARER_TOKEN"
+}
 
 $live = Invoke-RestMethod -Uri "$BaseUrl/health/live" -Method Get
 Write-Host "live:   $($live.status)"

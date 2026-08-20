@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--policy", default=os.environ.get("BLOOMBERG_MCP_POLICY", "config/policy.example.yaml"))
     parser.add_argument("--backend", choices=["native", "fake"], default=os.environ.get("BLOOMBERG_MCP_BACKEND"))
     parser.add_argument("--host", default=None)
-    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--port", type=int, default=_env_int("BLOOMBERG_MCP_PORT"))
     parser.add_argument("--version", action="version", version=f"bloomberg-mcp {__version__}")
     args = parser.parse_args(argv)
 
@@ -131,6 +131,16 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         lock.release()
     return 0
+
+
+def _env_int(name: str) -> int | None:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return None
 
 
 def _with_server(config: GatewayConfig, *, host: str, port: int | None) -> GatewayConfig:

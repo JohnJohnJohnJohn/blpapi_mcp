@@ -1,16 +1,32 @@
 # configure-tailscale.ps1 — configure Tailscale Serve as a private HTTPS
 # proxy to the localhost-bound gateway (SPEC §4.12).
 #
-# Keeps the gateway on 127.0.0.1:8765 and exposes it to the tailnet only via
-# Tailscale Serve (never Funnel). Verifies Funnel is not enabled on the port.
+# Exposes the gateway to the tailnet only via Tailscale Serve (never Funnel).
+# The backend port defaults to BLOOMBERG_MCP_PORT from the environment or the
+# repo .env file (falling back to 8765). Verifies Funnel is not enabled.
 
 param(
-    [int]$BackendPort = 8765,
+    [int]$BackendPort = 0,
     [int]$HttpsPort = 443,
     [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-ConfiguredPort {
+    if ($env:BLOOMBERG_MCP_PORT) { return [int]$env:BLOOMBERG_MCP_PORT }
+    $envFile = Join-Path (Split-Path -Parent $PSScriptRoot) ".env"
+    if (Test-Path $envFile) {
+        foreach ($line in Get-Content $envFile) {
+            if ($line -match '^\s*BLOOMBERG_MCP_PORT\s*=\s*(\d+)') { return [int]$Matches[1] }
+        }
+    }
+    return 8765
+}
+
+if ($BackendPort -le 0) {
+    $BackendPort = Get-ConfiguredPort
+}
 
 $ts = Get-Command tailscale -ErrorAction SilentlyContinue
 if (-not $ts) {

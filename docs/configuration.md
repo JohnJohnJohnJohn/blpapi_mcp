@@ -9,6 +9,9 @@ Two YAML files drive the gateway:
 
 Paths may be overridden with `--config` / `--policy` or the
 `BLOOMBERG_MCP_CONFIG` / `BLOOMBERG_MCP_POLICY` environment variables.
+The HTTP port may be overridden with `BLOOMBERG_MCP_PORT` (or `--port`,
+or `scripts\run.ps1 -Port`) — useful when another workstation application
+occupies the 8765 default.
 String values support `%ENVVAR%` and `${ENVVAR}` expansion (e.g. the default
 artifact directory `%LOCALAPPDATA%\BloombergMCP\data`).
 
