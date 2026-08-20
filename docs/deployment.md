@@ -66,6 +66,18 @@ The task runs after that user logs on, restarts on failure with bounded
 retry, and stops on logout/shutdown. A named Windows mutex prevents a second
 gateway instance.
 
+### Stopping the gateway
+
+```powershell
+.\scripts\stop.ps1
+```
+
+Handles every launch mode: stops the scheduled task if it is running,
+otherwise terminates the `bloomberg_mcp.main` python process(es). For an
+interactive foreground run, `Ctrl+C` also performs a graceful shutdown.
+Stopping is always safe: all writes are atomic and no state requires a
+graceful flush.
+
 ## 5. Tailscale Serve
 
 ```powershell
