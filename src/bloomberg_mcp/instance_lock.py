@@ -24,7 +24,8 @@ class InstanceLockHeld(RuntimeError):
 
 
 class InstanceLock:
-    def __init__(self) -> None:
+    def __init__(self, mutex_name: str = MUTEX_NAME) -> None:
+        self._mutex_name = mutex_name
         self._mutex_handle: object | None = None
         self._socket: socket.socket | None = None
 
@@ -41,14 +42,14 @@ class InstanceLock:
         kernel32 = ctypes.windll.kernel32
         kernel32.CreateMutexW.argtypes = [wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR]
         kernel32.CreateMutexW.restype = wintypes.HANDLE
-        handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+        handle = kernel32.CreateMutexW(None, False, self._mutex_name)
         if not handle:
             raise InstanceLockHeld("CreateMutexW failed")
         if kernel32.GetLastError() == _ERROR_ALREADY_EXISTS:
             kernel32.CloseHandle(handle)
-            raise InstanceLockHeld(f"mutex {MUTEX_NAME} is already held")
+            raise InstanceLockHeld(f"mutex {self._mutex_name} is already held")
         self._mutex_handle = handle
-        logger.info("acquired single-instance mutex %s", MUTEX_NAME)
+        logger.info("acquired single-instance mutex %s", self._mutex_name)
 
     def _acquire_socket(self) -> None:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

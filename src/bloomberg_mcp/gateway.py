@@ -7,13 +7,17 @@ this object only through canonical APIs.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import random
 from pathlib import Path
 
 from bloomberg_mcp.blp.backend import BloombergBackend
 from bloomberg_mcp.blp.fake_backend import FakeBloombergBackend
 from bloomberg_mcp.blp.native_backend import NativeBloombergBackend
 from bloomberg_mcp.config import GatewayConfig
+from bloomberg_mcp.errors import GatewayError
 from bloomberg_mcp.models import SessionState
 from bloomberg_mcp.normalization.registry import NormalizerRegistry, build_default_registry
 from bloomberg_mcp.observability.audit import AuditLogger
@@ -81,6 +85,7 @@ class Gateway:
             config.storage.cleanup_interval_seconds,
             [self._sweep_once],
         )
+        self._retry_task: asyncio.Task[None] | None = None
         self._started = False
 
     async def start(self) -> None:
@@ -89,17 +94,45 @@ class Gateway:
             await self.backend.start()
         except Exception:
             # The HTTP process stays available even when Bloomberg is down
-            # (SPEC §4.9); the health model reports the degraded state.
-            logger.exception("backend startup failed; serving degraded")
+            # (SPEC §4.9); the health model reports the degraded state, tools
+            # fail fast with retryable errors, and we keep retrying in the
+            # background so the gateway recovers once the Terminal starts.
+            logger.exception("backend startup failed; serving degraded; retrying in background")
+            if self.config.bloomberg.reconnect.enabled:
+                self._retry_task = asyncio.get_running_loop().create_task(self._retry_backend_start())
         self._cleanup.start()
 
     async def stop(self) -> None:
+        self._started = False
+        if self._retry_task is not None:
+            self._retry_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._retry_task
+            self._retry_task = None
         await self._cleanup.stop()
         try:
             await self.backend.stop()
         except Exception:
             logger.exception("backend shutdown failed")
-        self._started = False
+
+    async def _retry_backend_start(self) -> None:
+        """Keep retrying backend startup with the configured backoff."""
+        cfg = self.config.bloomberg.reconnect
+        delay = cfg.initial_delay_seconds
+        while self._started:
+            jitter = 1.0 + random.uniform(-cfg.jitter, cfg.jitter)
+            await asyncio.sleep(max(0.1, delay * jitter))
+            if not self._started:
+                return
+            try:
+                await self.backend.start()
+                logger.info("backend connected after retry (session is available again)")
+                return
+            except GatewayError as exc:
+                logger.warning("backend retry failed: %s", exc.message)
+            except Exception:
+                logger.exception("backend retry failed unexpectedly")
+            delay = min(delay * cfg.multiplier, cfg.maximum_delay_seconds)
 
     async def _on_session_event(self, state: SessionState, generation: int) -> None:
         logger.info("session event: %s generation=%d", state.value, generation)

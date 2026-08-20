@@ -158,6 +158,10 @@ class NativeBloombergBackend(BloombergBackend):
     def get_operation(self, service: str, operation: str) -> OperationDescriptor:
         operations = self._services.operations(service)
         if operation not in operations:
+            if self.session_state is not SessionState.CONNECTED:
+                # Schemas are unavailable while disconnected: report the real
+                # cause (retryable) instead of a misleading INVALID_OPERATION.
+                self.assert_available()
             raise GatewayError(ErrorCode.INVALID_OPERATION, f"Unknown operation {operation!r} on {service!r}.")
         return operations[operation]
 

@@ -28,6 +28,9 @@ def build_canonical_request(
     response_mode: ResponseMode = ResponseMode.CANONICAL,
 ) -> CanonicalRequest:
     gateway.policy.authorize_execution(principal, service, operation)
+    # Schema lookup needs a live session; when the Terminal is down, fail
+    # fast with a clean retryable error instead of a misleading one.
+    gateway.backend.assert_available()
     descriptor = gateway.backend.get_operation(service, operation)
     if schema_hash is not None and schema_hash != descriptor.schema_hash:
         raise GatewayError(

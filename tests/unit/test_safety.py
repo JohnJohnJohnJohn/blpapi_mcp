@@ -127,10 +127,15 @@ def test_file_store_expiry(tmp_path) -> None:
 
 
 def test_instance_lock_single_instance() -> None:
-    first = InstanceLock()
+    # Test-private mutex name: the production mutex may legitimately be held
+    # by a running gateway on developer machines.
+    import os
+
+    name = f"Local\\BloombergMCP.Test.{os.getpid()}"
+    first = InstanceLock(name)
     first.acquire()
     try:
-        second = InstanceLock()
+        second = InstanceLock(name)
         from bloomberg_mcp.instance_lock import InstanceLockHeld
 
         with pytest.raises(InstanceLockHeld):
@@ -138,6 +143,6 @@ def test_instance_lock_single_instance() -> None:
     finally:
         first.release()
     # After release, acquisition succeeds again.
-    third = InstanceLock()
+    third = InstanceLock(name)
     third.acquire()
     third.release()

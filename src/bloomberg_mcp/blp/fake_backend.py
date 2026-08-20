@@ -333,10 +333,21 @@ class FakeBloombergBackend(BloombergBackend):
         self.response_delay_seconds: float = 0.0
         #: Count of partial responses emitted per request (default 2).
         self.partial_response_count: int = 2
+        #: Simulate the Terminal being down: start() fails this many times
+        #: before succeeding (drives the gateway's degraded + retry path).
+        self.start_failures_remaining: int = 0
 
     # ---------------------------------------------------------------- lifecycle
 
     async def start(self) -> None:
+        if self.start_failures_remaining > 0:
+            self.start_failures_remaining -= 1
+            self._state = SessionState.STOPPED
+            raise GatewayError(
+                ErrorCode.BLOOMBERG_NOT_CONNECTED,
+                "Simulated: Bloomberg Terminal is not running.",
+                retryable=True,
+            )
         self._state = SessionState.CONNECTED
         self._generation += 1
         for service in self._startup_services:

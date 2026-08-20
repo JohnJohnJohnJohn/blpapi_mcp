@@ -128,13 +128,25 @@ class BloombergBackend(abc.ABC):
 
     # ------------------------------------------------------------------ helpers
 
-    async def require_connected(self) -> None:
+    def assert_available(self) -> None:
+        """Synchronous availability gate for tool pipelines.
+
+        When the Bloomberg Terminal session is down the gateway keeps serving
+        HTTP (SPEC §4.9) but every Bloomberg-dependent call fails fast with a
+        stable, retryable error so agents know to retry later.
+        """
         if self.session_state is not SessionState.CONNECTED:
             raise GatewayError(
                 code=_session_error_code(self.session_state),
-                message="Bloomberg session is not connected.",
+                message=(
+                    "Bloomberg service is currently unavailable (Terminal session not "
+                    "connected). Nothing was submitted; retry later."
+                ),
                 retryable=True,
             )
+
+    async def require_connected(self) -> None:
+        self.assert_available()
 
 
 def _session_error_code(state: SessionState) -> Any:
