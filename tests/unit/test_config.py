@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-from bloomberg_mcp.config import expand_env, load_gateway_config
+from bloomberg_mcp.config import expand_env, load_dotenv, load_gateway_config
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 
 REPO = str(Path(__file__).resolve().parents[2])
@@ -34,6 +35,34 @@ def test_env_expansion_windows_and_posix(monkeypatch: pytest.MonkeyPatch) -> Non
     assert expand_env("%BMCP_TEST_DIR%/data") == "C:/tmp/bmcp/data"
     assert expand_env("${BMCP_TEST_DIR}/data") == "C:/tmp/bmcp/data"
     assert expand_env("%BMCP_UNSET_XYZ%") == "%BMCP_UNSET_XYZ%"
+
+
+def test_load_dotenv_sets_unset_and_preserves_existing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    dotenv = tmp_path / ".env"
+    dotenv.write_text(
+        "# comment\n"
+        "BMCP_NEW_VAR=hello\n"
+        'BMCP_QUOTED="with spaces"\n'
+        "BMCP_EXISTING=from-file\n"
+        "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BMCP_EXISTING", "from-env")
+    monkeypatch.delenv("BMCP_NEW_VAR", raising=False)
+    monkeypatch.delenv("BMCP_QUOTED", raising=False)
+
+    loaded = load_dotenv(str(dotenv))
+    assert loaded == 2
+    assert os.environ["BMCP_NEW_VAR"] == "hello"
+    assert os.environ["BMCP_QUOTED"] == "with spaces"
+    # Existing environment variables always win.
+    assert os.environ["BMCP_EXISTING"] == "from-env"
+
+
+def test_load_dotenv_missing_file_is_noop(tmp_path: Path) -> None:
+    assert load_dotenv(str(tmp_path / "does-not-exist.env")) == 0
 
 
 def test_stateful_mode_rejected(tmp_path) -> None:

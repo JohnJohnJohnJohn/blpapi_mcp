@@ -17,7 +17,7 @@ import uvicorn
 
 from bloomberg_mcp import __version__
 from bloomberg_mcp.auth.token_verifier import TokenVerifier
-from bloomberg_mcp.config import GatewayConfig, load_gateway_config
+from bloomberg_mcp.config import GatewayConfig, load_dotenv, load_gateway_config
 from bloomberg_mcp.errors import GatewayError
 from bloomberg_mcp.gateway import Gateway
 from bloomberg_mcp.instance_lock import InstanceLock, InstanceLockHeld
@@ -52,6 +52,9 @@ def _configure_logging(config: GatewayConfig) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Load .env (repo root) before reading env-driven defaults; already-set
+    # environment variables always take precedence.
+    load_dotenv()
     parser = argparse.ArgumentParser(prog="bloomberg-mcp", description="Bloomberg MCP Gateway")
     parser.add_argument("--config", default=os.environ.get("BLOOMBERG_MCP_CONFIG", "config/default.yaml"))
     parser.add_argument("--policy", default=os.environ.get("BLOOMBERG_MCP_POLICY", "config/policy.example.yaml"))

@@ -12,6 +12,11 @@ Paths may be overridden with `--config` / `--policy` or the
 String values support `%ENVVAR%` and `${ENVVAR}` expansion (e.g. the default
 artifact directory `%LOCALAPPDATA%\BloombergMCP\data`).
 
+At startup the gateway also loads a `.env` file from the working directory
+(repo root) if present: `KEY=VALUE` lines, `#` comments, optional quotes.
+Already-set environment variables always take precedence. `.env` is
+git-ignored — copy `.env.example` to `.env` and fill in your token.
+
 ## Backend selection
 
 `backend: native | fake` (or `--backend`, or `BLOOMBERG_MCP_BACKEND`).
