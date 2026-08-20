@@ -1,0 +1,40 @@
+# Bloomberg MCP Gateway — logging configuration (Python dictConfig).
+# The audit logger writes structured records separately (see docs/security.md);
+# this file governs application diagnostics only. Tokens and unbounded payloads
+# must never be logged (SPEC §4.8).
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  text:
+    format: "%(asctime)s %(levelname)s %(name)s %(message)s"
+  json:
+    class: bloomberg_mcp.observability.audit.JsonFormatter
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: text
+    stream: ext://sys.stderr
+  file:
+    class: logging.handlers.RotatingFileHandler
+    formatter: json
+    filename: "%LOCALAPPDATA%\\BloombergMCP\\logs\\gateway.log"
+    maxBytes: 10485760
+    backupCount: 5
+    encoding: utf-8
+
+loggers:
+  bloomberg_mcp:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  bloomberg_mcp.audit:
+    level: INFO
+    handlers: [file]
+    propagate: false
+
+root:
+  level: WARNING
+  handlers: [console]

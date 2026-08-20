@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# uv
+.uv-cache/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+coverage.xml
+htmlcov/
+
+# Environment and secrets — never commit tokens or credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Runtime data, logs and temporary result artifacts
+data/
+logs/
+*.log
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Milestone probe dumps may contain proprietary schema details — keep local
+probe-output/

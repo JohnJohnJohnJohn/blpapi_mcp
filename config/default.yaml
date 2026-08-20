@@ -1,0 +1,90 @@
+# Bloomberg MCP Gateway — default configuration.
+# See docs/configuration.md for full reference.
+
+backend: "native"   # native | fake
+
+server:
+  host: "127.0.0.1"
+  port: 8765
+  mcp_path: "/mcp"
+  protocol_revision: "2026-07-28"
+  stateless: true
+  max_request_body_bytes: 1048576
+  shutdown_timeout_seconds: 30
+  allowed_hosts: []       # empty = allow Host values that resolve to the bound listener
+  allowed_origins: []     # empty = reject any present Origin header unless it matches bound listener
+  artifact_endpoint_enabled: false
+  metrics_endpoint_enabled: true
+
+bloomberg:
+  host: "127.0.0.1"
+  port: 8194
+  connect_timeout_seconds: 10
+  automatic_request_replay: false
+  reconnect:
+    enabled: true
+    initial_delay_seconds: 1
+    maximum_delay_seconds: 60
+    multiplier: 2
+    jitter: 0.2
+  startup_services:
+    - "//blp/refdata"
+    - "//blp/mktdata"
+    - "//blp/instruments"
+    - "//blp/apiflds"
+
+requests:
+  max_concurrent: 4
+  max_queued: 50
+  default_wait_seconds: 30
+  maximum_wait_seconds: 60
+  default_deadline_seconds: 120
+  maximum_deadline_seconds: 300
+  deduplication_window_seconds: 300
+  maximum_response_bytes: 268435456
+  inline_result_bytes: 1048576
+  result_ttl_seconds: 86400
+
+subscriptions:
+  maximum_per_principal: 20
+  maximum_topics_per_group: 100
+  maximum_fields_per_topic: 50
+  maximum_buffered_events: 10000
+  maximum_ttl_seconds: 86400
+  default_ttl_seconds: 3600
+  maximum_long_poll_seconds: 15
+  maximum_concurrent_long_polls: 10
+  restore_after_reconnect: true
+
+storage:
+  enabled: true
+  directory: "%LOCALAPPDATA%\\BloombergMCP\\data"
+  maximum_total_bytes: 10737418240
+  cleanup_interval_seconds: 300
+  default_canonical_format: "jsonl"
+  default_tabular_format: "parquet"
+
+auth:
+  profile: "private-static-bearer"
+  mcp_oauth_compliant: false
+  token_source: "env"     # env | file | windows_credential_manager
+  token_file: ""          # used when token_source=file
+  credential_target: "BloombergMCP/bearer"   # used when token_source=windows_credential_manager
+  token_overlap_seconds: 3600
+
+governance:
+  daily_request_budget: 10000
+  monthly_request_budget: 200000
+  entitlement_failure_circuit_threshold: 5
+  persist_usage_counters: true
+  persist_result_artifacts: true
+
+audit:
+  enabled: true
+  include_security_names: false
+  include_field_names: true
+  include_parameters: false
+
+logging:
+  level: "INFO"
+  json: true

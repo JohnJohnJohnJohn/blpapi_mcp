@@ -1,0 +1,77 @@
+# Bloomberg MCP Gateway — policy example.
+# Discovery and execution permissions are distinct (SPEC §4.2).
+
+principals:
+  hermes:
+    scopes:
+      - "bloomberg:discover"
+      - "bloomberg:reference"
+      - "bloomberg:historical"
+      - "bloomberg:intraday"
+      - "bloomberg:generic-request"
+      - "bloomberg:subscribe"
+      - "bloomberg:result-read"
+
+services:
+  "//blp/refdata":
+    open: true
+    discover: true
+    operations:
+      "*":
+        discover: true
+        execute: false
+      "ReferenceDataRequest":
+        execute: true
+        required_scope: "bloomberg:reference"
+      "HistoricalDataRequest":
+        execute: true
+        required_scope: "bloomberg:historical"
+      "IntradayBarRequest":
+        execute: true
+        required_scope: "bloomberg:intraday"
+      "IntradayTickRequest":
+        execute: true
+        required_scope: "bloomberg:intraday"
+
+  "//blp/instruments":
+    open: true
+    discover: true
+    operations:
+      "*":
+        discover: true
+        execute: false
+      "instrumentListRequest":
+        execute: true
+      "curveListRequest":
+        execute: true
+      "govtListRequest":
+        execute: true
+
+  "//blp/apiflds":
+    open: true
+    discover: true
+    operations:
+      "*":
+        discover: true
+        execute: false
+      "FieldSearchRequest":
+        execute: true
+
+  "//blp/mktdata":
+    open: true
+    discover: true
+    subscriptions: true
+
+defaults:
+  deny_unconfigured_services: true
+  deny_unconfigured_operations: true
+  deny_authorization_operations: true
+  deny_provider_operations: true
+  reject_unknown_elements: true
+
+limits:
+  maximum_securities: 100
+  maximum_fields: 100
+  maximum_estimated_observations: 1000000
+  maximum_request_array_elements: 10000
+  maximum_nesting_depth: 32
