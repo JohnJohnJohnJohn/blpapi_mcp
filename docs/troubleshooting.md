@@ -9,6 +9,7 @@
 | `bearer token must contain at least 256 bits` | Regenerate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
 | `configuration error: ...` | Hard constraints violated (non-local BBComm host, `stateless: false`, replay enabled, unknown auth profile). See `docs/configuration.md`. |
 | Gateway starts but `/health/ready` shows `bloomberg_session: DISCONNECTED` | The HTTP process intentionally stays up. Check that the Terminal is running and logged on; see session errors below. |
+| `error: cannot bind 127.0.0.1:8765 - the port is already in use` (WinError 10048) | Another application owns the port (on trading workstations, tools like DeskPricer use 8765). Find it with `netstat -ano \| findstr :8765`, then run the gateway on another port: `.\scripts\run.ps1 -Port 8766` (and point `scripts\configure-tailscale.ps1 -BackendPort 8766` / `scripts\health-check.ps1 -BaseUrl http://127.0.0.1:8766` at it too). |
 
 ## Bloomberg session
 

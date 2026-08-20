@@ -4,12 +4,16 @@
 #   .\scripts\run.ps1                     # native backend, default config
 #   .\scripts\run.ps1 -Backend fake       # deterministic backend (no Terminal)
 #   .\scripts\run.ps1 -Config x.yaml -Policy y.yaml
+#   .\scripts\run.ps1 -Port 8766          # use another HTTP port
 
 param(
     [ValidateSet("native", "fake")]
     [string]$Backend = "",
     [string]$Config = "",
-    [string]$Policy = ""
+    [string]$Policy = "",
+    [Alias("Host")]
+    [string]$ListenHost = "",
+    [int]$Port = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,6 +30,8 @@ $arguments = @("-m", "bloomberg_mcp.main")
 if ($Backend) { $arguments += @("--backend", $Backend) }
 if ($Config) { $arguments += @("--config", $Config) }
 if ($Policy) { $arguments += @("--policy", $Policy) }
+if ($ListenHost) { $arguments += @("--host", $ListenHost) }
+if ($Port -gt 0) { $arguments += @("--port", $Port) }
 
 Set-Location $RepoRoot
 & $Python @arguments

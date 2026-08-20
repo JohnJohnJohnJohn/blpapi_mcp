@@ -91,6 +91,16 @@ def main(argv: list[str] | None = None) -> int:
 
     _configure_logging(config)
 
+    if not _port_available(config.server.host, config.server.port):
+        print(
+            f"error: cannot bind {config.server.host}:{config.server.port} - the port is already in use.\n"
+            f"Find the owner with:  netstat -ano | findstr :{config.server.port}\n"
+            f"Free the port, or run the gateway on another one, e.g.\n"
+            f"  scripts\\run.ps1 -Port {config.server.port + 1}",
+            file=sys.stderr,
+        )
+        return 4
+
     try:
         verifier = TokenVerifier(config.auth, policy)
     except GatewayError as exc:
@@ -128,6 +138,20 @@ def _with_server(config: GatewayConfig, *, host: str, port: int | None) -> Gatew
 
     server = replace(config.server, host=host, port=port if port is not None else config.server.port)
     return replace(config, server=server)
+
+
+def _port_available(host: str, port: int) -> bool:
+    """Bind probe without SO_REUSEADDR so real conflicts are detected."""
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
 
 
 if __name__ == "__main__":
