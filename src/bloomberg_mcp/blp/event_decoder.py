@@ -70,14 +70,16 @@ def decode_element(element: blpapi.Element, *, typed: bool) -> Any:
     datatype = canonical_datatype(element.datatype())
 
     if datatype == BloombergDatatype.SEQUENCE:
-        values: list[Any] = []
-        for index in range(element.numValues()):
-            if element.isNullValue(index):
-                values.append(None)
-                continue
-            child = element.getValueAsElement(index)
-            values.append(decode_sequence_element(child, typed=typed))
-        return values
+        if element.isArray():
+            # Array of sequences: each entry is decoded as a sequence object.
+            values: list[Any] = []
+            for index in range(element.numValues()):
+                child = element.getValueAsElement(index)
+                values.append(decode_sequence_element(child, typed=typed))
+            return values
+        # Single sequence object: decode its named members directly.
+        # (getValueAsElement / isNullValue are invalid for non-array sequences.)
+        return decode_sequence_element(element, typed=typed)
 
     if datatype == BloombergDatatype.CHOICE:
         choice = element.getChoice()

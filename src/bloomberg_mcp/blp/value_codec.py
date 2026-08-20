@@ -83,6 +83,8 @@ def encode_value(value: Any, datatype: BloombergDatatype, *, typed: bool) -> Any
         raise GatewayError(ErrorCode.INTERNAL_ERROR, "DATE value is not a calendar date")
 
     if datatype == BloombergDatatype.TIME:
+        if isinstance(value, _dt.datetime):
+            value = value.timetz()
         if isinstance(value, _dt.time):
             text = _iso_time(value)
             if typed:
@@ -91,6 +93,12 @@ def encode_value(value: Any, datatype: BloombergDatatype, *, typed: bool) -> Any
         raise GatewayError(ErrorCode.INTERNAL_ERROR, "TIME value is not a time")
 
     if datatype == BloombergDatatype.DATETIME:
+        if isinstance(value, _dt.time):
+            # Datetime element whose value carries only a time part.
+            text = _iso_time(value)
+            if typed:
+                return {"$blp_type": "TIME", "value": text, "timezone": _timezone_label(value)}
+            return text
         if isinstance(value, _dt.datetime):
             text = _iso_datetime(value)
             if typed:

@@ -123,7 +123,7 @@ async def get_intraday_bars(gateway: Gateway, principal: Principal, arguments: d
     parameters = {
         "security": _str_list(arguments, "security", maximum=1)[0],
         "eventType": str(arguments.get("event_type", "TRADE")).upper(),
-        "interval": str(arguments.get("interval", "60")),
+        "interval": int(arguments.get("interval", 60)),
         "startDateTime": arguments.get("start_date_time"),
         "endDateTime": arguments.get("end_date_time"),
     }
@@ -143,23 +143,26 @@ async def get_intraday_ticks(gateway: Gateway, principal: Principal, arguments: 
 async def search_instruments(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
     parameters: dict[str, Any] = {
         "query": str(arguments.get("query", "")),
-        "maxResults": str(min(int(arguments.get("max_results", 10)), 100)),
+        "maxResults": min(int(arguments.get("max_results", 10)), 100),
     }
     yellow_keys = _str_list(arguments, "yellow_key_filters", required=False)
     if yellow_keys:
-        parameters["yellowKeyFilters"] = yellow_keys
+        parameters["yellowKeyFilter"] = yellow_keys[0]
     return await _run_normalized(
         gateway, principal, INSTRUMENTS, "instrumentListRequest", parameters, "search_instruments"
     )
 
 
 async def search_curves(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
-    parameters = {
-        "currency": str(arguments.get("currency", "")),
-        "maxResults": str(min(int(arguments.get("max_results", 10)), 100)),
+    parameters: dict[str, Any] = {
+        "maxResults": min(int(arguments.get("max_results", 10)), 100),
     }
+    if arguments.get("query"):
+        parameters["query"] = str(arguments["query"])
     if arguments.get("country"):
-        parameters["country"] = str(arguments["country"])
+        parameters["countryCode"] = str(arguments["country"])
+    if arguments.get("currency"):
+        parameters["currencyCode"] = str(arguments["currency"])
     if arguments.get("curve_type"):
         parameters["type"] = str(arguments["curve_type"])
     return await _run_normalized(gateway, principal, INSTRUMENTS, "curveListRequest", parameters, "search_curves")
@@ -168,19 +171,20 @@ async def search_curves(gateway: Gateway, principal: Principal, arguments: dict[
 async def search_government_securities(
     gateway: Gateway, principal: Principal, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    parameters = {
-        "country": str(arguments.get("country", "")),
-        "maxResults": str(min(int(arguments.get("max_results", 10)), 100)),
+    parameters: dict[str, Any] = {
+        "query": str(arguments.get("country", "")),
+        "maxResults": min(int(arguments.get("max_results", 10)), 100),
     }
+    if arguments.get("ticker"):
+        parameters["ticker"] = str(arguments["ticker"])
     return await _run_normalized(
         gateway, principal, INSTRUMENTS, "govtListRequest", parameters, "search_government_securities"
     )
 
 
 async def search_fields(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
-    parameters = {
+    parameters: dict[str, Any] = {
         "searchSpec": str(arguments.get("search_spec", "")),
-        "maxResults": str(min(int(arguments.get("max_results", 10)), 100)),
     }
     return await _run_normalized(gateway, principal, APIFLDS, "FieldSearchRequest", parameters, "search_fields")
 
