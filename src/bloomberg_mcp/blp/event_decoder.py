@@ -89,12 +89,17 @@ def decode_element(element: blpapi.Element, *, typed: bool) -> Any:
     if count == 0:
         return None
     if count == 1:
-        if element.isNullValue(0):
-            return None
+        # A scalar with one value cannot be null here — null scalars have
+        # numValues() == 0 and were handled above. (isNullValue(position)
+        # indexes sub-elements, not values, and raises on scalars.)
         return _decode_scalar(element, 0, datatype, typed=typed)
     decoded: list[Any] = []
     for index in range(count):
-        if element.isNullValue(index):
+        try:
+            is_null = element.isNullValue(index)
+        except Exception:
+            is_null = False  # not supported for this element kind — decode directly
+        if is_null:
             decoded.append(None)
         else:
             decoded.append(_decode_scalar(element, index, datatype, typed=typed))
