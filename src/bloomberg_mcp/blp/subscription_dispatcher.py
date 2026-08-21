@@ -35,7 +35,6 @@ class SubscriptionDispatcher:
         self._loop: asyncio.AbstractEventLoop | None = None
         # Throttle state for diagnostic logging (key -> last emit timestamp).
         self._warned_at: dict[str, float] = {}
-        self._info_at: dict[str, float] = {}
         self._drop_count: int = 0
 
     def attach_session_manager(self, manager: SessionManager) -> None:
@@ -121,17 +120,6 @@ class SubscriptionDispatcher:
                 continue
             payload = decode_sequence_element(message.asElement(), typed=False)
             status, error_code, error_message = _extract_status(payload)
-            now = time.monotonic()
-            key = f"route:{kind.value}"
-            last = self._info_at.get(key, 0.0)
-            if now - last >= 10.0:
-                self._info_at[key] = now
-                logger.debug(
-                    "native subscription event %s routed (token=%s, message_type=%s)",
-                    kind.value,
-                    tokens[0],
-                    message.messageType(),
-                )
             subscription_event = SubscriptionEvent(
                 native_token=tokens[0] if tokens else 0,
                 kind=kind,
