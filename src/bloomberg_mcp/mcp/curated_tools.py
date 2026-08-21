@@ -140,6 +140,43 @@ async def get_intraday_ticks(gateway: Gateway, principal: Principal, arguments: 
     return await _run_normalized(gateway, principal, REFDATA, "IntradayTickRequest", parameters, "get_intraday_ticks")
 
 
+_YK_FILTER_ALIASES: dict[str, str] = {
+    # Friendly yellow-key names -> native YK_FILTER_* enum constants.
+    "equity": "YK_FILTER_EQTY",
+    "corp": "YK_FILTER_CORP",
+    "corporate": "YK_FILTER_CORP",
+    "bond": "YK_FILTER_CORP",
+    "govt": "YK_FILTER_GOVT",
+    "government": "YK_FILTER_GOVT",
+    "muni": "YK_FILTER_MUNI",
+    "municipal": "YK_FILTER_MUNI",
+    "currency": "YK_FILTER_CURR",
+    "fx": "YK_FILTER_CURR",
+    "commodity": "YK_FILTER_CMDT",
+    "index": "YK_FILTER_INDX",
+    "mmkt": "YK_FILTER_MMKT",
+    "moneymarket": "YK_FILTER_MMKT",
+    "mtge": "YK_FILTER_MTGE",
+    "mortgage": "YK_FILTER_MTGE",
+    "prfd": "YK_FILTER_PRFD",
+    "preferred": "YK_FILTER_PRFD",
+    "client": "YK_FILTER_CLNT",
+    "none": "YK_FILTER_NONE",
+}
+
+
+def _map_yellow_key_filter(value: str) -> str:
+    """Map a curated friendly yellow-key value to the native YK_FILTER_* constant.
+
+    Raw ``YK_FILTER_*`` constants pass through unchanged; unknown friendly
+    names are returned verbatim so native validation reports the allowed enum.
+    """
+    key = value.strip().lower()
+    if key in _YK_FILTER_ALIASES:
+        return _YK_FILTER_ALIASES[key]
+    return value
+
+
 async def search_instruments(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
     parameters: dict[str, Any] = {
         "query": str(arguments.get("query", "")),
@@ -147,7 +184,7 @@ async def search_instruments(gateway: Gateway, principal: Principal, arguments: 
     }
     yellow_keys = _str_list(arguments, "yellow_key_filters", required=False)
     if yellow_keys:
-        parameters["yellowKeyFilter"] = yellow_keys[0]
+        parameters["yellowKeyFilter"] = _map_yellow_key_filter(yellow_keys[0])
     return await _run_normalized(
         gateway, principal, INSTRUMENTS, "instrumentListRequest", parameters, "search_instruments"
     )
@@ -186,7 +223,15 @@ async def search_fields(gateway: Gateway, principal: Principal, arguments: dict[
     parameters: dict[str, Any] = {
         "searchSpec": str(arguments.get("search_spec", "")),
     }
-    return await _run_normalized(gateway, principal, APIFLDS, "FieldSearchRequest", parameters, "search_fields")
+    result = await _run_normalized(gateway, principal, APIFLDS, "FieldSearchRequest", parameters, "search_fields")
+    # FieldSearchRequest has no native maxResults element (verified live
+    # 2026-08-21); honour the curated cap by truncating rows client-side.
+    max_results = arguments.get("max_results")
+    if max_results is not None:
+        data = result.get("data")
+        if isinstance(data, dict) and isinstance(data.get("rows"), list):
+            data["rows"] = data["rows"][: int(max_results)]
+    return result
 
 
 async def get_market_snapshot(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:

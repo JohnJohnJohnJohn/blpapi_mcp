@@ -206,6 +206,27 @@ class SubscriptionRegistry:
         latest.update(event.payload)
         self._wake(runtime)
 
+    def _warn_if_stuck_starting(self, runtime: _GroupRuntime) -> None:
+        """Surface a diagnostic when a group never transitions out of STARTING.
+
+        A liquid topic (e.g. EURUSD Curncy) that receives no SUBSCRIPTION_STARTED
+        event for a sustained period means the native session never confirmed the
+        subscription; the log line names the group for server-side correlation.
+        """
+        group = runtime.group
+        if group.status is not SubscriptionGroupStatus.STARTING:
+            return
+        age = (utc_now() - group.created_at).total_seconds()
+        if age >= self._config.maximum_long_poll_seconds:
+            logger.warning(
+                "subscription %s still STARTING after %.0fs (topic=%s, item_statuses=%s); "
+                "no native activation event received",
+                group.subscription_id,
+                age,
+                [item.topic for item in group.items.values()],
+                [item.status.value for item in group.items.values()],
+            )
+
     def _recompute_group_status(self, runtime: _GroupRuntime) -> None:
         statuses = {item.status for item in runtime.group.items.values()}
         if statuses == {SubscriptionItemStatus.ACTIVE}:
@@ -245,6 +266,7 @@ class SubscriptionRegistry:
             raise GatewayError(ErrorCode.SUBSCRIPTION_EXPIRED, "Subscription is no longer active.")
         if generation is not None and generation != group.generation:
             raise GatewayError(ErrorCode.CURSOR_INVALID, "Subscription generation has changed.")
+        self._warn_if_stuck_starting(runtime)
 
         if mode == "latest":
             return {

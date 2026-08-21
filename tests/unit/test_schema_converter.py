@@ -90,6 +90,25 @@ def test_scalar_accepts_singleton_list() -> None:
         validate_parameters(descriptor, {"security": ["A", "B"]}, LIMITS, reject_unknown_elements=True)
 
 
+def test_strict_types_rejects_scalar_for_array() -> None:
+    descriptor = _request((_scalar("securities", min_values=1, max_values=None),))
+    # Lenient (default): a bare scalar is coerced to a singleton list.
+    validated = validate_parameters(
+        descriptor, {"securities": "AAPL US Equity"}, LIMITS, reject_unknown_elements=True
+    )
+    assert validated == {"securities": ["AAPL US Equity"]}
+    # Strict: the advertised schema says array; a scalar is rejected.
+    with pytest.raises(GatewayError) as excinfo:
+        validate_parameters(
+            descriptor,
+            {"securities": "AAPL US Equity"},
+            LIMITS,
+            reject_unknown_elements=True,
+            strict_types=True,
+        )
+    assert excinfo.value.code is ErrorCode.INVALID_ELEMENT_TYPE
+
+
 def test_nested_sequences_and_repeated_sequences() -> None:
     overrides = _seq("overrides", (_scalar("fieldId", min_values=1), _scalar("value", min_values=1)), max_values=None)
     descriptor = _request((overrides,))

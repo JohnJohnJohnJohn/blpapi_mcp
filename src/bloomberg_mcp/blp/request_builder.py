@@ -10,6 +10,8 @@ Native methods used (blpapi 3.26.7.1): ``Service.createRequest``,
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Mapping
 from typing import Any
 
@@ -18,6 +20,8 @@ import blpapi
 from bloomberg_mcp.blp.name_cache import NameCache
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.models import BloombergDatatype, ElementDescriptor
+
+_LOG = logging.getLogger(__name__)
 
 
 def populate_request(
@@ -31,6 +35,14 @@ def populate_request(
         child = children.get(key)
         if child is None:
             raise GatewayError(ErrorCode.UNKNOWN_ELEMENT, f"Unknown element {key!r} during native build.")
+        if _LOG.isEnabledFor(logging.DEBUG):
+            _LOG.debug(
+                "populate element %r datatype=%s max_values=%s value=%r",
+                child.name,
+                child.datatype.value,
+                child.max_values,
+                value,
+            )
         _set_element(request.getElement(name_cache.get(child.name)), child, value, name_cache)
 
 

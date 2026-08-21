@@ -28,6 +28,7 @@ from bloomberg_mcp.blp.name_cache import NameCache
 from bloomberg_mcp.blp.request_builder import populate_request
 from bloomberg_mcp.blp.request_executor import read_event_queue
 from bloomberg_mcp.blp.schema_registry import SchemaRegistry
+from bloomberg_mcp.models import ResponseMode
 from bloomberg_mcp.blp.service_registry import ServiceRegistry
 from bloomberg_mcp.blp.session_manager import SessionManager
 from bloomberg_mcp.blp.subscription_dispatcher import SubscriptionDispatcher
@@ -227,6 +228,7 @@ class NativeBloombergBackend(BloombergBackend):
                 lambda: self._session_manager.state,
                 self._on_entitlement_failure,
             ),
+            kwargs={"typed": request.response_mode == ResponseMode.TYPED},
             name=f"blp-request-{token}",
             daemon=True,
         ).start()

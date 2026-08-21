@@ -252,6 +252,7 @@ class RequestRecord:
     warnings: list[GatewayWarning] = field(default_factory=list)
     error: GatewayError | None = None
     idempotent_replay: bool = False
+    response_mode: str | None = None
 
 
 @dataclass

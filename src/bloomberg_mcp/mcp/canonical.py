@@ -26,6 +26,7 @@ def build_canonical_request(
     *,
     schema_hash: str | None,
     response_mode: ResponseMode = ResponseMode.CANONICAL,
+    strict_types: bool = False,
 ) -> CanonicalRequest:
     gateway.policy.authorize_execution(principal, service, operation)
     # Schema lookup needs a live session; when the Terminal is down, fail
@@ -45,6 +46,7 @@ def build_canonical_request(
         dict(parameters),
         limits,
         reject_unknown_elements=gateway.policy_config.defaults.reject_unknown_elements,
+        strict_types=strict_types,
     ) if descriptor.request else dict(parameters)
 
     cost = estimate_cost(operation, validated)

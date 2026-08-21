@@ -39,7 +39,14 @@ def read_event_queue(
     deadline: float,
     session_state: Callable[[], SessionState],
     on_entitlement_failure: EntitlementCallback | None,
+    *,
+    typed: bool = False,
 ) -> None:
+    """Read events off a native queue and decode them into canonical messages.
+
+    ``typed`` selects typed decoding ($blp_type tags) for response_mode=typed
+    requests; the tagged payloads are emitted verbatim by the typed finalizer.
+    """
     sequence = 0
     try:
         while True:
@@ -57,7 +64,7 @@ def read_event_queue(
                 service=service,
                 session_generation=generation,
                 start_sequence=sequence,
-                typed=False,
+                typed=typed,
             )
             sequence += len(messages)
             terminal: GatewayError | None = None

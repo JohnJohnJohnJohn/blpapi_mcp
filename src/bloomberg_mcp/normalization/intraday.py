@@ -1,11 +1,17 @@
-"""Intraday bar and tick normalizers (SPEC §3.6)."""
+"""Intraday bar and tick normalizers (SPEC §3.6).
+
+The canonical decoder emits ``barData`` / ``tickData`` as single sequence
+objects (dicts, one per message); bar/tick rows live under ``barTickData`` /
+``tickData``. The request is single-security, so the security label comes from
+the request parameters.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from bloomberg_mcp.models import CanonicalMessage, CanonicalRequest
-from bloomberg_mcp.normalization.registry import merged_sequence, stamp
+from bloomberg_mcp.normalization.registry import stamp, walk_sequence
 
 
 class IntradayBarNormalizer:
@@ -13,10 +19,10 @@ class IntradayBarNormalizer:
 
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
-        for entry in merged_sequence(messages, "barData"):
+        security = request.parameters.get("security")
+        for entry in walk_sequence(messages, "barData"):
             if not isinstance(entry, dict) or isinstance(entry.get("securityError"), dict):
                 continue
-            security = entry.get("security")
             for bar in entry.get("barTickData") or []:
                 if not isinstance(bar, dict):
                     continue
@@ -37,10 +43,10 @@ class IntradayTickNormalizer:
 
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
-        for entry in merged_sequence(messages, "tickData"):
+        security = request.parameters.get("security")
+        for entry in walk_sequence(messages, "tickData"):
             if not isinstance(entry, dict) or isinstance(entry.get("securityError"), dict):
                 continue
-            security = entry.get("security")
             for tick in entry.get("tickData") or []:
                 if not isinstance(tick, dict):
                     continue

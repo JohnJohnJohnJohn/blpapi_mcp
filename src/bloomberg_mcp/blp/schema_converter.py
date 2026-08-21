@@ -161,16 +161,20 @@ def validate_parameters(
     limits: PolicyLimits,
     *,
     reject_unknown_elements: bool,
+    strict_types: bool = False,
 ) -> dict[str, Any]:
     """Validate raw input against the operation request descriptor.
 
     Returns the canonical parameter mapping (decoded native Python values).
     Raises :class:`GatewayError` with the precise application error code.
+
+    ``strict_types`` disables the lenient singleton coercion (a bare scalar
+    where the schema declares an array): the value must then be a list.
     """
     if not isinstance(parameters, dict):
         raise GatewayError(ErrorCode.INVALID_ARGUMENT, "parameters must be an object")
     counters = _Counters(limits)
-    return _validate_object(descriptor, parameters, reject_unknown_elements, counters, depth=0)
+    return _validate_object(descriptor, parameters, reject_unknown_elements, counters, depth=0, strict_types=strict_types)
 
 
 class _Counters:
@@ -193,6 +197,8 @@ def _validate_object(
     reject_unknown: bool,
     counters: _Counters,
     depth: int,
+    *,
+    strict_types: bool = False,
 ) -> dict[str, Any]:
     if depth > counters.limits.maximum_nesting_depth:
         raise GatewayError(ErrorCode.REQUEST_TOO_LARGE, "Request nesting depth exceeds policy limit.")
@@ -212,7 +218,7 @@ def _validate_object(
                     f"Unknown element {key!r} for this request schema.",
                 )
             continue
-        result[child.name] = _validate_element(child, raw, reject_unknown, counters, depth)
+        result[child.name] = _validate_element(child, raw, reject_unknown, counters, depth, strict_types=strict_types)
 
     for child in descriptor.children:
         if child.min_values >= 1 and child.name not in result:
@@ -229,9 +235,16 @@ def _validate_element(
     reject_unknown: bool,
     counters: _Counters,
     depth: int,
+    *,
+    strict_types: bool = False,
 ) -> Any:
     if descriptor.datatype == BloombergDatatype.SEQUENCE:
         if descriptor.max_values != 1:
+            if strict_types and not isinstance(raw, list):
+                raise GatewayError(
+                    ErrorCode.INVALID_ELEMENT_TYPE,
+                    f"Element {descriptor.name!r} expects an array.",
+                )
             items = raw if isinstance(raw, list) else [raw]
             counters.count_array_items(len(items))
             if descriptor.max_values is not None and len(items) > descriptor.max_values:
@@ -246,7 +259,9 @@ def _validate_element(
                         ErrorCode.INVALID_ELEMENT_TYPE,
                         f"Sequence element {descriptor.name!r} expects object entries.",
                     )
-                validated_items.append(_validate_object(descriptor, item, reject_unknown, counters, depth + 1))
+                validated_items.append(
+                    _validate_object(descriptor, item, reject_unknown, counters, depth + 1, strict_types=strict_types)
+                )
             return validated_items
         if isinstance(raw, list):
             if len(raw) != 1:
@@ -260,7 +275,7 @@ def _validate_element(
                 ErrorCode.INVALID_ELEMENT_TYPE,
                 f"Element {descriptor.name!r} expects an object.",
             )
-        return _validate_object(descriptor, raw, reject_unknown, counters, depth + 1)
+        return _validate_object(descriptor, raw, reject_unknown, counters, depth + 1, strict_types=strict_types)
 
     if descriptor.datatype == BloombergDatatype.CHOICE:
         if not isinstance(raw, dict) or len(raw) != 1:
@@ -277,11 +292,16 @@ def _validate_element(
             )
         branch_value = raw[branch_name]
         if branch.datatype == BloombergDatatype.SEQUENCE and isinstance(branch_value, dict):
-            return _validate_object(branch, branch_value, reject_unknown, counters, depth + 1)
+            return _validate_object(branch, branch_value, reject_unknown, counters, depth + 1, strict_types=strict_types)
         return {branch_name: _validate_scalar(branch, branch_value)}
 
     # Scalar or repeated scalar / repeated sequence.
     if descriptor.max_values != 1:
+        if strict_types and not isinstance(raw, list):
+            raise GatewayError(
+                ErrorCode.INVALID_ELEMENT_TYPE,
+                f"Element {descriptor.name!r} expects an array.",
+            )
         items = raw if isinstance(raw, list) else [raw]
         counters.count_array_items(len(items))
         if descriptor.max_values is not None and len(items) > descriptor.max_values:

@@ -116,6 +116,7 @@ class RequestExecutor:
             parameters_hash=_parameters_hash(canonical.parameters),
             created_at=now,
             deadline=now + timedelta(seconds=deadline_seconds),
+            response_mode=canonical.response_mode.value,
         )
         self._registry.register(record)
         if client_request_id:
@@ -343,6 +344,7 @@ class RequestExecutor:
             "service": record.service,
             "operation": record.operation,
             "session_generation": record.session_generation,
+            "response_mode": record.response_mode,
             "event_count": record.event_count,
             "partial_response_count": record.partial_response_count,
             "byte_count": record.byte_count,

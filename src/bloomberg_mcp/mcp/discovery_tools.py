@@ -124,8 +124,17 @@ async def validate_request(gateway: Gateway, principal: Principal, arguments: di
     if not isinstance(parameters, dict):
         raise GatewayError(ErrorCode.INVALID_ARGUMENT, "parameters must be an object.")
     schema_hash = arguments.get("schema_hash")
+    options = arguments.get("options") or {}
+    if not isinstance(options, dict):
+        raise GatewayError(ErrorCode.INVALID_ARGUMENT, "options must be an object.")
     canonical = build_canonical_request(
-        gateway, principal, service, operation, parameters, schema_hash=schema_hash
+        gateway,
+        principal,
+        service,
+        operation,
+        parameters,
+        schema_hash=schema_hash,
+        strict_types=bool(options.get("strict_types", False)),
     )
     cost = canonical.estimated_cost
     return envelope(
@@ -256,7 +265,10 @@ TOOLS: list[ToolSpec] = [
                 "parameters": {"type": "object"},
                 "options": {
                     "type": "object",
-                    "properties": {"reject_unknown_elements": {"type": "boolean"}},
+                    "properties": {
+                        "reject_unknown_elements": {"type": "boolean"},
+                        "strict_types": {"type": "boolean", "description": "Reject a bare scalar where the schema declares an array (default: singleton coercion)."},
+                    },
                     "additionalProperties": False,
                 },
             },

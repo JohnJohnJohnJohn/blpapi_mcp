@@ -58,6 +58,30 @@ def merged_sequence(messages: list[CanonicalMessage], *path: str) -> list[Any]:
     return collected
 
 
+def walk_sequence(messages: list[CanonicalMessage], *path: str) -> list[Any]:
+    """Collect dict nodes along a path whose intermediate steps may be dicts OR lists.
+
+    The canonical decoder emits a *single sequence object* (dict) for elements
+    such as HistoricalDataResponse ``securityData`` / IntradayBarResponse
+    ``barData`` (one object per message), while arrays of sequences decode as
+    lists. ``merged_sequence`` only handles the list case; this helper handles
+    both so normalizers are robust to either shape.
+    """
+    nodes: list[Any] = [dict(message.payload) for message in messages]
+    for key in path:
+        expanded: list[Any] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            child = node.get(key)
+            if isinstance(child, list):
+                expanded.extend(child)
+            elif isinstance(child, dict):
+                expanded.append(child)
+        nodes = expanded
+    return nodes
+
+
 def build_default_registry() -> NormalizerRegistry:
     from bloomberg_mcp.normalization.fields import FieldSearchNormalizer
     from bloomberg_mcp.normalization.historical import HistoricalNormalizer
