@@ -172,13 +172,18 @@ class NativeBloombergBackend(BloombergBackend):
     # ------------------------------------------------------------------ requests
 
     @staticmethod
-    def _log_built_request(native_request: blpapi.Request, service: str, operation: str) -> None:
+    def _log_built_request(
+        native_request: blpapi.Request, service: str, operation: str, parameter_keys: Sequence[str]
+    ) -> None:
         """INFO-level dump of the built native request (element -> value count).
 
         This is the discriminator for silently-ignored parameters (e.g.
         overrides): an element that was built appears with its value count;
         one that never made it into the native request is absent or array[0].
         """
+        logger.info(
+            "populating native request %s/%s with parameters: %s", service, operation, sorted(parameter_keys)
+        )
         try:
             parts: list[str] = []
             for index in range(native_request.numElements()):
@@ -189,8 +194,8 @@ class NativeBloombergBackend(BloombergBackend):
                 else:
                     parts.append(f"{name}=scalar")
             logger.info("native request %s/%s built: %s", service, operation, ", ".join(parts))
-        except Exception:  # pragma: no cover - observability must never break requests
-            pass
+        except Exception as exc:  # pragma: no cover - observability must never break requests
+            logger.warning("native request %s/%s introspection failed: %s", service, operation, exc)
 
     async def submit_request(self, request: CanonicalRequest, external_request_id: str) -> ExecutionHandle:
         await self.require_connected()
@@ -219,7 +224,7 @@ class NativeBloombergBackend(BloombergBackend):
             await asyncio.to_thread(
                 populate_request, native_request, descriptor.request, request.parameters, self._name_cache
             )
-            self._log_built_request(native_request, request.service, request.operation)
+            self._log_built_request(native_request, request.service, request.operation, list(request.parameters))
             session = self._session_manager.session
             assert session is not None
             await asyncio.to_thread(session.sendRequest, native_request, None, correlation_id, event_queue)

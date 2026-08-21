@@ -101,6 +101,13 @@ class SubscriptionDispatcher:
             ]
             payload = decode_sequence_element(message.asElement(), typed=False)
             status, error_code, error_message = _extract_status(payload)
+            if not tokens:
+                # Event with no INT correlation id: cannot be routed to an item.
+                logger.warning(
+                    "native subscription event %s with no INT correlation id dropped (message_type=%s)",
+                    kind.value,
+                    message.messageType(),
+                )
             subscription_event = SubscriptionEvent(
                 native_token=tokens[0] if tokens else 0,
                 kind=kind,
