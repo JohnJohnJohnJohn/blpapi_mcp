@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 import blpapi
@@ -32,6 +33,10 @@ class SubscriptionDispatcher:
         self._session_manager: SessionManager | None = None
         self._sink: SubscriptionSink | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Throttle state for diagnostic logging (key -> last emit timestamp).
+        self._warned_at: dict[str, float] = {}
+        self._info_at: dict[str, float] = {}
+        self._drop_count: int = 0
 
     def attach_session_manager(self, manager: SessionManager) -> None:
         self._session_manager = manager
@@ -96,16 +101,35 @@ class SubscriptionDispatcher:
         if self._sink is None or self._loop is None:
             return
         for message in event:
-            tokens = [
-                int(cid.value()) for cid in message.correlationIds() if cid.type() == blpapi.CorrelationId.INT_TYPE
-            ]
+            tokens = _extract_tokens(message)
+            if not tokens:
+                self._drop_count += 1
+                now = time.monotonic()
+                key = f"drop:{kind.value}:{message.messageType()}"
+                last = self._warned_at.get(key, 0.0)
+                if now - last >= 10.0:
+                    self._warned_at[key] = now
+                    raw_cids = [repr(cid.value()) for cid in message.correlationIds()] or ["<none>"]
+                    logger.warning(
+                        "dropped %d native subscription event(s) (%s, message_type=%s) with unroutable "
+                        "correlation id %s; data is arriving but cannot be matched to an item",
+                        self._drop_count,
+                        kind.value,
+                        message.messageType(),
+                        ",".join(raw_cids[:8]),
+                    )
+                continue
             payload = decode_sequence_element(message.asElement(), typed=False)
             status, error_code, error_message = _extract_status(payload)
-            if not tokens:
-                # Event with no INT correlation id: cannot be routed to an item.
-                logger.warning(
-                    "native subscription event %s with no INT correlation id dropped (message_type=%s)",
+            now = time.monotonic()
+            key = f"route:{kind.value}"
+            last = self._info_at.get(key, 0.0)
+            if now - last >= 10.0:
+                self._info_at[key] = now
+                logger.info(
+                    "native subscription event %s routed (token=%s, message_type=%s)",
                     kind.value,
+                    tokens[0],
                     message.messageType(),
                 )
             subscription_event = SubscriptionEvent(
@@ -125,6 +149,23 @@ class SubscriptionDispatcher:
         if sink is None:
             return
         asyncio.ensure_future(sink(event))
+
+
+def _extract_tokens(message: blpapi.Message) -> list[int]:
+    """Correlation-id tokens from a native message, type-agnostic.
+
+    Live observation (2026-08-21): MarketDataEvents carry correlation ids that
+    are not INT_TYPE even though the subscription was registered with integer
+    tokens; filtering by type silently dropped every subscription event. Accept
+    any id whose value coerces to int (INT ids pass through unchanged).
+    """
+    tokens: list[int] = []
+    for cid in message.correlationIds():
+        try:
+            tokens.append(int(cid.value()))
+        except (TypeError, ValueError):
+            continue
+    return tokens
 
 
 def _extract_status(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
