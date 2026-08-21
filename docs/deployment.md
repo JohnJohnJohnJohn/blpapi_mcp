@@ -64,7 +64,10 @@ Start-ScheduledTask -TaskName BloombergMCP-Gateway
 
 The task runs after that user logs on, restarts on failure with bounded
 retry, and stops on logout/shutdown. A named Windows mutex prevents a second
-gateway instance.
+gateway instance; on non-Windows platforms a name-keyed `fcntl.flock` file
+lock (`%TEMP%/bloomberg_mcp_<name>.lock`) provides the same guarantee (the
+earlier fixed-port + `SO_REUSEADDR` approach silently allowed duplicate binds
+on Linux and has been removed).
 
 ### Stopping the gateway
 

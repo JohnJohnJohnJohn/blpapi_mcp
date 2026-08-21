@@ -9,7 +9,7 @@ from bloomberg_mcp.blp.schema_converter import descriptor_to_json_schema
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.gateway import Gateway
 from bloomberg_mcp.mcp.canonical import build_canonical_request
-from bloomberg_mcp.mcp.output_schemas import envelope
+from bloomberg_mcp.mcp.output_schemas import envelope, with_data
 from bloomberg_mcp.mcp.tool_spec import ToolSpec
 from bloomberg_mcp.policy.engine import SCOPE_DISCOVER
 
@@ -135,6 +135,7 @@ async def validate_request(gateway: Gateway, principal: Principal, arguments: di
         parameters,
         schema_hash=schema_hash,
         strict_types=bool(options.get("strict_types", False)),
+        reject_unknown_elements=options.get("reject_unknown_elements"),
     )
     cost = canonical.estimated_cost
     return envelope(
@@ -200,6 +201,16 @@ TOOLS: list[ToolSpec] = [
         scope=SCOPE_DISCOVER,
         handler=list_services,
         read_only=True,
+        output_schema=with_data(
+            {
+                "type": "object",
+                "properties": {
+                    "services": {"type": "array", "items": {"type": "object"}},
+                    "unopened": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["services"],
+            }
+        ),
     ),
     ToolSpec(
         name="blpapi_open_service",
@@ -214,6 +225,13 @@ TOOLS: list[ToolSpec] = [
         scope=SCOPE_DISCOVER,
         handler=open_service,
         idempotent=True,
+        output_schema=with_data(
+            {
+                "type": "object",
+                "properties": {"service": {"type": "string"}, "opened": {"type": "boolean"}},
+                "required": ["service"],
+            }
+        ),
     ),
     ToolSpec(
         name="blpapi_describe_service",
@@ -233,6 +251,16 @@ TOOLS: list[ToolSpec] = [
         scope=SCOPE_DISCOVER,
         handler=describe_service,
         read_only=True,
+        output_schema=with_data(
+            {
+                "type": "object",
+                "properties": {
+                    "service": {"type": "string"},
+                    "operations": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["service"],
+            }
+        ),
     ),
     ToolSpec(
         name="blpapi_describe_operation",
@@ -251,6 +279,20 @@ TOOLS: list[ToolSpec] = [
         scope=SCOPE_DISCOVER,
         handler=describe_operation,
         read_only=True,
+        output_schema=with_data(
+            {
+                "type": "object",
+                "properties": {
+                    "service": {"type": "string"},
+                    "operation": {"type": "string"},
+                    "schema_hash": {"type": "string"},
+                    "request_schema": {"type": "object"},
+                    "response_schemas": {"type": "array", "items": {"type": "object"}},
+                    "policy": {"type": "object"},
+                },
+                "required": ["service", "operation", "schema_hash"],
+            }
+        ),
     ),
     ToolSpec(
         name="blpapi_validate_request",
@@ -272,7 +314,13 @@ TOOLS: list[ToolSpec] = [
                     "type": "object",
                     "properties": {
                         "reject_unknown_elements": {"type": "boolean"},
-                        "strict_types": {"type": "boolean", "description": "Reject a bare scalar where the schema declares an array (default: singleton coercion)."},
+                        "strict_types": {
+                            "type": "boolean",
+                            "description": (
+                                "Reject a bare scalar where the schema declares an array "
+                                "(default: singleton coercion)."
+                            ),
+                        },
                     },
                     "additionalProperties": False,
                 },
@@ -283,5 +331,25 @@ TOOLS: list[ToolSpec] = [
         scope=None,
         handler=validate_request,
         read_only=True,
+        output_schema=with_data(
+            {
+                "type": "object",
+                "properties": {
+                    "valid": {"type": "boolean"},
+                    "canonical_request": {"type": "object"},
+                    "estimated_cost": {
+                        "type": "object",
+                        "properties": {
+                            "securities": {"type": "integer"},
+                            "fields": {"type": "integer"},
+                            "estimated_observations": {"type": "integer"},
+                            "risk_score": {"type": "integer"},
+                        },
+                    },
+                    "warnings": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["valid", "estimated_cost"],
+            }
+        ),
     ),
 ]

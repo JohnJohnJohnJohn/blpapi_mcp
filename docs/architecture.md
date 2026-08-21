@@ -55,6 +55,14 @@ generation change; in-flight requests fail with `BLOOMBERG_SESSION_LOST`
 restored after reconnect only when `subscriptions.restore_after_reconnect`
 is set, with a new generation and a data-gap warning.
 
+A single generation-transition coordinator (`_transition`) is used by both
+startup and reconnect: it tears down the old session, reopens the configured
+services, marks `CONNECTED` only after required services are open, treats
+optional-service reopen failures as warnings (they never stall reconnection),
+and emits exactly one schema-refresh/notification per transition. Required
+service failure at startup leaves the session in `FAILED` rather than a
+misleading `CONNECTED`.
+
 ## Canonical request pipeline (SPEC §2.8, §4.3)
 
 ```

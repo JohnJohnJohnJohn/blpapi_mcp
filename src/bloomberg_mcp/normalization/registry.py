@@ -9,6 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from bloomberg_mcp.canonical.walk import (
+    merged_sequence as walk_merged_sequence,
+)
+from bloomberg_mcp.canonical.walk import (
+    walk_sequence as walk_shared_sequence,
+)
 from bloomberg_mcp.models import CanonicalMessage, CanonicalRequest
 
 
@@ -45,41 +51,16 @@ def stamp(request: CanonicalRequest, normalizer: Normalizer, data: dict[str, Any
 
 def merged_sequence(messages: list[CanonicalMessage], *path: str) -> list[Any]:
     """Concatenate a nested sequence across partial + final responses."""
-    collected: list[Any] = []
-    for message in messages:
-        node: Any = dict(message.payload)
-        for key in path:
-            if not isinstance(node, dict):
-                node = None
-                break
-            node = node.get(key)
-        if isinstance(node, list):
-            collected.extend(node)
-    return collected
+    return walk_merged_sequence(messages, *path)
 
 
 def walk_sequence(messages: list[CanonicalMessage], *path: str) -> list[Any]:
     """Collect dict nodes along a path whose intermediate steps may be dicts OR lists.
 
-    The canonical decoder emits a *single sequence object* (dict) for elements
-    such as HistoricalDataResponse ``securityData`` / IntradayBarResponse
-    ``barData`` (one object per message), while arrays of sequences decode as
-    lists. ``merged_sequence`` only handles the list case; this helper handles
-    both so normalizers are robust to either shape.
+    Shared canonical walker (finding G); the implementation lives in
+    `bloomberg_mcp.canonical.walk` so request/error extraction reuses it.
     """
-    nodes: list[Any] = [dict(message.payload) for message in messages]
-    for key in path:
-        expanded: list[Any] = []
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            child = node.get(key)
-            if isinstance(child, list):
-                expanded.extend(child)
-            elif isinstance(child, dict):
-                expanded.append(child)
-        nodes = expanded
-    return nodes
+    return walk_shared_sequence(messages, *path)
 
 
 def build_default_registry() -> NormalizerRegistry:

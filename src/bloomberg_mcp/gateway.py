@@ -60,9 +60,7 @@ class Gateway:
         elif config.backend == "fake":
             self.backend = FakeBloombergBackend(startup_services=tuple(config.bloomberg.startup_services))
         else:
-            self.backend = NativeBloombergBackend(
-                config.bloomberg, config.requests, on_entitlement_failure=self.usage.entitlement_failure
-            )
+            self.backend = NativeBloombergBackend(config.bloomberg, config.requests)
 
         self.result_store = ResultStore(config.storage, persist_artifacts=config.governance.persist_result_artifacts)
         self.normalizers: NormalizerRegistry = build_default_registry()
@@ -136,14 +134,18 @@ class Gateway:
 
     async def _on_session_event(self, state: SessionState, generation: int) -> None:
         logger.info("session event: %s generation=%d", state.value, generation)
-        self.metrics.inc("blpapi_session_reconnects_total")
+        if state is SessionState.CONNECTED and generation > 1:
+            # Only actual reconnections count (finding O2); the initial
+            # CONNECTED at startup is not a reconnect.
+            self.metrics.inc("blpapi_session_reconnects_total")
         if state is SessionState.CONNECTED and self.config.subscriptions.restore_after_reconnect:
             await self.subscriptions.restore_after_reconnect()
 
-    def _sweep_once(self) -> int:
+    async def _sweep_once(self) -> int:
         removed = self.result_store.sweep_expired()
-        removed += len(self.subscriptions.expire_due())
-        self.request_registry.sweep()
+        removed += len(await self.subscriptions.expire_due())
+        removed += await self.subscriptions.retry_pending_unsubscribes()
+        self.request_registry.sweep(record_ttl_seconds=self.config.requests.result_ttl_seconds)
         stats = self.result_store.stats()
         self.metrics.set_gauge("result_store_bytes", stats["result_store_bytes"])
         self.metrics.set_gauge("result_store_artifacts", stats["result_store_artifacts"])

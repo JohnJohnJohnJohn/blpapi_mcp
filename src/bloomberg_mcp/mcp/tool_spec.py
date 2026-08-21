@@ -22,3 +22,6 @@ class ToolSpec:
     handler: ToolHandler
     read_only: bool = False
     idempotent: bool = False
+    #: Per-tool data contract advertised as outputSchema (finding O8); when
+    #: None the generic envelope schema is advertised.
+    output_schema: dict[str, Any] | None = None

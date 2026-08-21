@@ -8,7 +8,7 @@ from bloomberg_mcp.auth.principal import Principal
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.gateway import Gateway
 from bloomberg_mcp.mcp.canonical import build_canonical_request
-from bloomberg_mcp.mcp.output_schemas import envelope
+from bloomberg_mcp.mcp.output_schemas import envelope, with_data
 from bloomberg_mcp.mcp.tool_spec import ToolSpec
 from bloomberg_mcp.models import ResponseMode
 from bloomberg_mcp.policy.engine import SCOPE_GENERIC_REQUEST, SCOPE_RESULT_READ
@@ -59,6 +59,7 @@ async def send_request(gateway: Gateway, principal: Principal, arguments: dict[s
         preview_items=preview_items,
         is_admin=principal.admin,
         allow_canonical_fallback=bool(execution.get("allow_canonical_fallback", False)),
+        artifact_format=execution.get("artifact_format"),
     )
     ok = not isinstance(result.get("error"), dict)
     return envelope(
@@ -123,6 +124,21 @@ async def cancel_request(gateway: Gateway, principal: Principal, arguments: dict
     return envelope(ok=True, request_id=request_id, data=result)
 
 
+_REQUEST_RESULT_DATA = {
+    "type": "object",
+    "properties": {
+        "status": {"type": "string"},
+        "request_id": {"type": "string"},
+        "pending": {"type": "boolean"},
+        "data": {},
+        "preview": {},
+        "artifact": {"type": "object"},
+        "error": {"type": ["object", "null"]},
+    },
+    "required": ["status", "request_id"],
+}
+
+
 TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="blpapi_send_request",
@@ -157,6 +173,7 @@ TOOLS: list[ToolSpec] = [
         },
         scope=SCOPE_GENERIC_REQUEST,
         handler=send_request,
+        output_schema=with_data(_REQUEST_RESULT_DATA),
     ),
     ToolSpec(
         name="blpapi_get_request",
@@ -176,6 +193,7 @@ TOOLS: list[ToolSpec] = [
         scope=SCOPE_RESULT_READ,
         handler=get_request,
         read_only=True,
+        output_schema=with_data(_REQUEST_RESULT_DATA),
     ),
     ToolSpec(
         name="blpapi_cancel_request",

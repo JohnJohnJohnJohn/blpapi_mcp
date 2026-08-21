@@ -53,6 +53,18 @@ Tokens map to the first principal defined in the policy file; scopes come
 from that principal's entry. Tokens are compared in constant time (SHA-256 +
 `hmac.compare_digest`) and never logged.
 
+Rotation and principal binding:
+
+- `auth.principal_id` — optional explicit principal binding for the bearer
+  token. With more than one principal in the policy and no explicit
+  `principal_id`, the gateway **refuses to start** (ambiguous identity); with a
+  single principal the token binds to it as before.
+- `auth.previous_token_file` — optional file source for the previous token
+  when `token_source: file` (previous tokens otherwise come from the
+  `BLOOMBERG_MCP_BEARER_TOKEN_PREVIOUS` environment variable). Previous tokens
+  expire after `auth.token_overlap_seconds`, so a rotated-out token cannot
+  authenticate for the process lifetime.
+
 ## Policy (SPEC §4.2)
 
 - `principals.<name>.scopes` — capability scopes (`bloomberg:discover`,
@@ -70,11 +82,14 @@ while only named operations are executable.
 ## Governance (SPEC §1.8)
 
 Daily/monthly request budgets per principal (`LICENSE_BUDGET_EXCEEDED` on
-exhaustion), an entitlement circuit breaker that opens after
-`entitlement_failure_circuit_threshold` consecutive entitlement failures and
-closes on operator intervention (`reset_entitlement_circuit`) or a successful
-entitled exchange, and persistence toggles for usage counters and artifacts.
-Policy limits do not replace Bloomberg contractual or entitlement limits.
+exhaustion), per-service entitlement circuits that open after
+`entitlement_failure_circuit_threshold` consecutive entitlement failures on a
+service family and close on operator intervention
+(`reset_entitlement_circuit`) or a successful entitled exchange on the same
+family, per-client-address authentication rate limiting
+(`auth_failure_rate_limit`), and persistence toggles for usage counters and
+artifacts. Policy limits do not replace Bloomberg contractual or entitlement
+limits.
 
 ## Storage (SPEC §4.7)
 

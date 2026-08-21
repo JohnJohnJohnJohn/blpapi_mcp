@@ -23,6 +23,10 @@ failures set `isError` on the MCP result.
 Every tool advertises `inputSchema` and `outputSchema` (`additionalProperties:
 false` on inputs, so unknown input elements are rejected) and tool
 annotations (`readOnlyHint`, `idempotentHint`, `openWorldHint`).
+`outputSchema` is **per tool**: each tool's `data` block is described by its
+own schema (`send_request`/`get_request` declare the request-result shape,
+discovery tools declare their service/operation/schema objects, and so on),
+so schema-driven clients can validate and type results structurally.
 
 Protocol note: on `2026-07-28` each call carries the per-request `_meta`
 envelope (`io.modelcontextprotocol/protocolVersion`,
@@ -58,18 +62,25 @@ request with `idempotent_replay: true`), and `execution`:
   `normalized` (registered operations only);
 - `allow_canonical_fallback` — fall back to canonical when no normalizer
   exists instead of `NORMALIZER_NOT_AVAILABLE`;
+- `artifact_format` — `auto` (default: inline JSON up to
+  `requests.inline_result_bytes`, JSONL artifact beyond), `json` (inline JSON,
+  JSON artifact when large), `jsonl` (always a JSONL artifact);
 - `preview_items` — preview size for resource-linked large results.
 
-Large results exceeding `requests.inline_result_bytes` are stored as JSONL
-artifacts and returned as an `artifact` block with `resource_uri`
-(`bloomberg-result://res_.../metadata`) and a bounded preview.
+Large results exceeding `requests.inline_result_bytes` (and **normalized**
+output, which honours the same bound) are stored as artifacts — JSONL (or
+JSON) — and returned as an `artifact` block with `resource_uri`
+(`bloomberg-result://res_.../metadata`), a bounded preview, and a `LARGE_RESULT`
+warning. Artifact-backed tool results additionally carry an MCP
+`EmbeddedResource` content block so clients can link rather than copy the
+payload.
 
 ## Subscription tools (scope `bloomberg:subscribe`)
 
 | Tool | Purpose |
 |---|---|
 | `blpapi_subscribe` | Create a group of market-data topics (per-item native correlation tokens, bounded buffer, TTL) |
-| `blpapi_read_subscription` | `mode: latest` snapshot or `mode: changes` with cursors; long-poll via `wait_seconds` (bounded) |
+| `blpapi_read_subscription` | `mode: latest` snapshot or `mode: changes` with cursors; long-poll via `wait_seconds` (bounded); cursors are consumed on use — a replayed handle returns `CURSOR_INVALID`, and stale cursors expire (`subscriptions.cursor_ttl_seconds`) |
 | `blpapi_resubscribe` | Whole-group replacement: same id, new generation, new item ids, cursors invalidated, gap warning |
 | `blpapi_cancel_subscription` | Idempotent cancel |
 | `blpapi_list_subscriptions` | Caller's groups (all groups with admin scope) |
@@ -93,6 +104,14 @@ Normalized payloads carry `normalized_schema_version`, `source_service`,
 `untrusted_text_fields`. Reference/historical tools accept `overrides`
 (object form, converted to the Bloomberg `fieldId`/`value` override
 sequences; duplicates and empty names rejected).
+
+Search normalizers retain each row's identifier and provenance columns:
+instruments emit `security` + `description` + `yellow_key`; curves emit the
+curve identifier (`curve`), `description`, `country`, `currency`; government
+securities emit `parseky`, `name`, `ticker`, `country`; field search emits
+`mnemonic`, `description`, `field_type`. Any additional fields the underlying
+service returns are preserved verbatim in a per-row `extra` object rather
+than silently dropped.
 
 ## Resources (SPEC §3.11)
 

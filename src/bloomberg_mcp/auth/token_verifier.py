@@ -14,6 +14,7 @@ import hmac
 import logging
 import os
 import sys
+from datetime import UTC, datetime, timedelta
 
 from bloomberg_mcp.auth.principal import Principal
 from bloomberg_mcp.config import AuthConfig
@@ -74,11 +75,14 @@ class TokenVerifier:
         self._policy = policy
         # sha256(token) -> principal_id ; current and previous tokens both map.
         self._token_digests: dict[bytes, str] = {}
+        # The previous token is valid only until its bounded overlap expiry.
+        self._previous_digest: bytes | None = None
+        self._previous_expires_at: datetime | None = None
         self._load_tokens()
 
     def _load_tokens(self) -> None:
         current = self._read_token("BLOOMBERG_MCP_BEARER_TOKEN")
-        previous = self._read_token("BLOOMBERG_MCP_BEARER_TOKEN_PREVIOUS")
+        previous = self._read_previous_token()
         if not current:
             raise GatewayError(
                 ErrorCode.AUTH_REQUIRED,
@@ -92,15 +96,48 @@ class TokenVerifier:
         principal_ids = list(self._policy.principals)
         if not principal_ids:
             raise GatewayError(ErrorCode.INVALID_ARGUMENT, "policy defines no principals")
-        self._token_digests[_digest(current)] = principal_ids[0]
+        if self._auth.principal_id:
+            # Explicit binding (finding M1): the token resolves to one named
+            # principal; a nonexistent principal id is a startup error.
+            if self._auth.principal_id not in self._policy.principals:
+                raise GatewayError(
+                    ErrorCode.INVALID_ARGUMENT,
+                    f"auth.principal_id {self._auth.principal_id!r} is not a defined policy principal",
+                )
+            principal_id = self._auth.principal_id
+        else:
+            # Single-principal invariant (finding M1): with more than one
+            # configured principal and no explicit binding the mapping is
+            # ambiguous, so startup refuses rather than silently collapsing
+            # every token onto the first principal.
+            if len(principal_ids) > 1:
+                raise GatewayError(
+                    ErrorCode.INVALID_ARGUMENT,
+                    "policy defines multiple principals but auth.principal_id is unset; "
+                    "configure the explicit token->principal mapping",
+                )
+            principal_id = principal_ids[0]
+        self._token_digests[_digest(current)] = principal_id
         if previous:
-            # During the bounded overlap window the previous token resolves to
-            # the same principal.
-            self._token_digests[_digest(previous)] = principal_ids[0]
+            self._previous_digest = _digest(previous)
+            self._previous_expires_at = datetime.now(UTC) + timedelta(seconds=self._auth.token_overlap_seconds)
+            self._token_digests[self._previous_digest] = principal_id
         logger.info("loaded %d bearer token(s)", len(self._token_digests))
 
+    def _read_previous_token(self) -> str | None:
+        """Read the previous token from a genuinely separate source (finding M3)."""
+        if self._auth.token_source == "file" and self._auth.previous_token_file:  # noqa: S105 - config field name
+            path = self._auth.previous_token_file
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    return handle.read().strip() or None
+            except OSError as exc:
+                raise GatewayError(ErrorCode.INVALID_ARGUMENT, f"cannot read previous token file: {exc}") from exc
+        # env (and credential-manager) sources already use a distinct name.
+        return self._read_token("BLOOMBERG_MCP_BEARER_TOKEN_PREVIOUS")
+
     def _read_token(self, env_name: str) -> str | None:
-        source = self._auth.token_source
+        source = self._auth.token_source  # noqa: S105 - config field name, not a credential
         if source == "env":
             return os.environ.get(env_name) or None
         if source == "file":
@@ -124,6 +161,16 @@ class TokenVerifier:
         ``hmac.compare_digest`` against every registered digest.
         """
         candidate = _digest(presented)
+        if (
+            self._previous_digest is not None
+            and hmac.compare_digest(candidate, self._previous_digest)
+            and self._previous_expires_at is not None
+            and datetime.now(UTC) >= self._previous_expires_at
+        ):
+            # Rotation overlap expired (finding M2): the previous token no
+            # longer authenticates.
+            self._token_digests.pop(self._previous_digest, None)
+            raise GatewayError(ErrorCode.AUTH_INVALID, "Invalid bearer token.")
         matched: str | None = None
         for digest, principal_id in self._token_digests.items():
             if hmac.compare_digest(candidate, digest):

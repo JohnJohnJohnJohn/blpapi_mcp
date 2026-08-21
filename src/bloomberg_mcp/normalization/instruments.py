@@ -11,7 +11,6 @@ security string as ``TICKER<yellow_key>``.
 from __future__ import annotations
 
 import re
-
 from typing import Any
 
 from bloomberg_mcp.models import CanonicalMessage, CanonicalRequest
@@ -30,6 +29,9 @@ def _yellow_key(security: Any) -> str | None:
 class InstrumentSearchNormalizer:
     schema_version = "bloomberg.instrument-search/1"
 
+    # Canonical columns consumed by the row; anything else is retained in "extra".
+    _CONSUMED = frozenset({"security", "description"})
+
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
         for entry in walk_sequence(messages, "results"):
@@ -39,17 +41,27 @@ class InstrumentSearchNormalizer:
             rows.append(
                 {
                     "name": entry.get("description") or security,
+                    "security": security,
                     "yellow_key": _yellow_key(security),
+                    "extra": {k: v for k, v in entry.items() if k not in self._CONSUMED},
                 }
             )
         # Instrument names originate from Bloomberg text and are untrusted.
         return stamp(
-            request, self, {"columns": ["name", "yellow_key"], "rows": rows, "untrusted_text_fields": ["name"]}
+            request,
+            self,
+            {
+                "columns": ["name", "security", "yellow_key", "extra"],
+                "rows": rows,
+                "untrusted_text_fields": ["name"],
+            },
         )
 
 
 class CurveSearchNormalizer:
     schema_version = "bloomberg.curve-search/1"
+
+    _CONSUMED = frozenset({"curve", "description", "country", "currency"})
 
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -59,19 +71,27 @@ class CurveSearchNormalizer:
             rows.append(
                 {
                     "name": entry.get("curve") or entry.get("description"),
+                    "curve": entry.get("curve"),
                     "country": entry.get("country"),
                     "currency": entry.get("currency"),
+                    "extra": {k: v for k, v in entry.items() if k not in self._CONSUMED},
                 }
             )
         return stamp(
             request,
             self,
-            {"columns": ["name", "country", "currency"], "rows": rows, "untrusted_text_fields": ["name"]},
+            {
+                "columns": ["name", "curve", "country", "currency", "extra"],
+                "rows": rows,
+                "untrusted_text_fields": ["name"],
+            },
         )
 
 
 class GovernmentSecuritySearchNormalizer:
     schema_version = "bloomberg.govt-search/1"
+
+    _CONSUMED = frozenset({"parseky", "name", "ticker", "country"})
 
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
@@ -83,11 +103,18 @@ class GovernmentSecuritySearchNormalizer:
             rows.append(
                 {
                     "name": entry.get("name") or entry.get("parseky"),
+                    "parseky": entry.get("parseky"),
+                    "ticker": entry.get("ticker"),
                     "country": entry.get("country"),
+                    "extra": {k: v for k, v in entry.items() if k not in self._CONSUMED},
                 }
             )
         return stamp(
             request,
             self,
-            {"columns": ["name", "country"], "rows": rows, "untrusted_text_fields": ["name"]},
+            {
+                "columns": ["name", "parseky", "ticker", "country", "extra"],
+                "rows": rows,
+                "untrusted_text_fields": ["name"],
+            },
         )

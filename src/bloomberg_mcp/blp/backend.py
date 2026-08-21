@@ -103,12 +103,26 @@ class BloombergBackend(abc.ABC):
     def list_operations(self, service: str) -> list[OperationDescriptor]: ...
 
     @abc.abstractmethod
-    async def submit_request(self, request: CanonicalRequest, external_request_id: str) -> ExecutionHandle:
-        """Submit a validated canonical request; returns the execution handle."""
+    async def submit_request(
+        self, request: CanonicalRequest, external_request_id: str, deadline_seconds: int | None = None
+    ) -> ExecutionHandle:
+        """Submit a validated canonical request; returns the execution handle.
+
+        ``deadline_seconds`` is the caller's overall deadline; the native
+        reader must stop at this bound instead of the global maximum.
+        """
 
     @abc.abstractmethod
     async def cancel_request(self, native_token: int) -> None:
         """Idempotent native cancellation of an in-flight request."""
+
+    @abc.abstractmethod
+    async def release_request(self, native_token: int) -> None:
+        """Release the native lease (correlation id, reader bookkeeping).
+
+        Idempotent; called from every terminal path (complete / fail /
+        cancel / timeout / session loss / shutdown) exactly once.
+        """
 
     @abc.abstractmethod
     async def subscribe(self, items: Sequence[Mapping[str, Any]], native_tokens: list[int]) -> None:

@@ -7,7 +7,7 @@ from typing import Any
 from bloomberg_mcp.auth.principal import Principal
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.gateway import Gateway
-from bloomberg_mcp.mcp.output_schemas import envelope
+from bloomberg_mcp.mcp.output_schemas import envelope, with_data
 from bloomberg_mcp.mcp.tool_spec import ToolSpec
 from bloomberg_mcp.models import SubscriptionGroup
 from bloomberg_mcp.policy.engine import SCOPE_SUBSCRIBE
@@ -55,7 +55,7 @@ def _subscriptions_argument(arguments: dict[str, Any]) -> list[dict[str, Any]]:
 async def subscribe(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
     gateway.policy.authorize_subscription_service(principal, SUBSCRIPTION_SERVICE)
     subscriptions = _subscriptions_argument(arguments)
-    gateway.quota.admit_subscription(
+    await gateway.quota.admit_subscription(
         principal.principal_id, gateway.subscriptions.active_group_count(principal.principal_id), len(subscriptions)
     )
     retention = arguments.get("retention")
@@ -149,6 +149,21 @@ _RETENTION_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_SUBSCRIPTION_DATA = {
+    "type": "object",
+    "properties": {
+        "subscription_id": {"type": "string"},
+        "generation": {"type": "integer"},
+        "status": {"type": "string"},
+        "items": {"type": "array", "items": {"type": "object"}},
+        "events": {"type": "array", "items": {"type": "object"}},
+        "cursor": {"type": ["string", "null"]},
+        "dropped_events": {"type": "integer"},
+    },
+    "required": ["subscription_id"],
+}
+
+
 TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="blpapi_subscribe",
@@ -165,6 +180,7 @@ TOOLS: list[ToolSpec] = [
         },
         scope=SCOPE_SUBSCRIBE,
         handler=subscribe,
+        output_schema=with_data(_SUBSCRIPTION_DATA),
     ),
     ToolSpec(
         name="blpapi_read_subscription",
@@ -185,6 +201,7 @@ TOOLS: list[ToolSpec] = [
         },
         scope=SCOPE_SUBSCRIBE,
         handler=read_subscription,
+        output_schema=with_data(_SUBSCRIPTION_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -205,6 +222,7 @@ TOOLS: list[ToolSpec] = [
         },
         scope=SCOPE_SUBSCRIBE,
         handler=resubscribe,
+        output_schema=with_data(_SUBSCRIPTION_DATA),
     ),
     ToolSpec(
         name="blpapi_cancel_subscription",
@@ -218,6 +236,7 @@ TOOLS: list[ToolSpec] = [
         },
         scope=SCOPE_SUBSCRIBE,
         handler=cancel_subscription,
+        output_schema=with_data(_SUBSCRIPTION_DATA),
         idempotent=True,
     ),
     ToolSpec(
@@ -227,6 +246,7 @@ TOOLS: list[ToolSpec] = [
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
         scope=SCOPE_SUBSCRIBE,
         handler=list_subscriptions,
+        output_schema=with_data(_SUBSCRIPTION_DATA),
         read_only=True,
     ),
 ]

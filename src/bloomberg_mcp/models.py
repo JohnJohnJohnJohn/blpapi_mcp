@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Any, Literal
 
 from bloomberg_mcp.errors import GatewayError
+from bloomberg_mcp.storage.models import ArtifactInfo
 
 
 def utc_now() -> datetime:
@@ -225,6 +226,28 @@ class GatewayWarning:
 
 
 @dataclass
+class FinalResult:
+    """Durable, terminal result owned by the request registry (SPEC §2.9).
+
+    Written once by ``_finalize`` and served identically to the original
+    caller, later ``blpapi_get_request`` polls and idempotent replays.
+    """
+
+    status: str
+    representation: str  # "canonical" | "typed" | "normalized"
+    data: Any | None = None  # bounded inline payload (messages or normalized rows)
+    preview: Any | None = None  # bounded preview (list, or table-shaped dict for normalized)
+    artifact: ArtifactInfo | None = None
+    warnings: list[GatewayWarning] = field(default_factory=list)
+    item_errors: list[ItemError] = field(default_factory=list)
+    error: GatewayError | None = None
+    completed_at: datetime | None = None
+    response_mode: str | None = None
+    normalized_schema_version: str | None = None
+    byte_count: int = 0
+
+
+@dataclass
 class RequestRecord:
     """Public state of one gateway request (SPEC §2.9)."""
 
@@ -253,6 +276,8 @@ class RequestRecord:
     error: GatewayError | None = None
     idempotent_replay: bool = False
     response_mode: str | None = None
+    expires_at: datetime | None = None
+    final_result: FinalResult | None = None
 
 
 @dataclass

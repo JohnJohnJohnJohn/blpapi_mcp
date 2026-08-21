@@ -48,5 +48,7 @@ class HealthService:
             "request_admission": admission,
             "subscription_admission": admission,
             "result_store": "READY" if self._inputs.result_store.is_ready() else "DEGRADED",
-            "entitlement_circuit": "OPEN" if self._inputs.quota.entitlement_circuit_open else "CLOSED",
+            "entitlement_circuit": (
+                "OPEN" if self._inputs.quota.entitlement_circuit_open("*") else "CLOSED"
+            ),
         }

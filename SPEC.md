@@ -1429,7 +1429,6 @@ storage:
   maximum_total_bytes: 10737418240
   cleanup_interval_seconds: 300
   default_canonical_format: "jsonl"
-  default_tabular_format: "parquet"
 
 auth:
   profile: "private-static-bearer"

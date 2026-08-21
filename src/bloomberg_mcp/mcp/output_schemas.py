@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from bloomberg_mcp.models import utc_now
@@ -37,6 +38,13 @@ ENVELOPE_SCHEMA: dict[str, Any] = {
     },
     "required": ["ok", "timestamp", "warnings", "item_errors"],
 }
+
+
+def with_data(data_schema: dict[str, Any] | None) -> dict[str, Any]:
+    """The standard envelope with a per-tool ``data`` contract (finding O8)."""
+    schema: dict[str, Any] = json.loads(json.dumps(ENVELOPE_SCHEMA))
+    schema["properties"] = {**schema["properties"], "data": data_schema if data_schema is not None else {}}
+    return schema
 
 
 def envelope(

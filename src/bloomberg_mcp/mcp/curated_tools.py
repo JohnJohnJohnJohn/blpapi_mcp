@@ -14,7 +14,7 @@ from bloomberg_mcp.auth.principal import Principal
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.gateway import Gateway
 from bloomberg_mcp.mcp.canonical import build_canonical_request, canonical_overrides
-from bloomberg_mcp.mcp.output_schemas import envelope
+from bloomberg_mcp.mcp.output_schemas import envelope, with_data
 from bloomberg_mcp.mcp.tool_spec import ToolSpec
 from bloomberg_mcp.models import ResponseMode
 
@@ -79,6 +79,7 @@ async def _run_normalized(
             ErrorCode.TIMEOUT,
             "Curated request did not complete within its conservative wait window.",
             retryable=True,
+            details={"request_id": result.get("request_id")},
         )
     failed = isinstance(result.get("error"), dict)
     return envelope(
@@ -275,6 +276,19 @@ def _schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
 _STRING_ARRAY = {"type": "array", "items": {"type": "string"}, "minItems": 1}
 _OVERRIDES_SCHEMA = {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean"]}}
 
+_TABLE_DATA = {
+    "type": "object",
+    "properties": {
+        "normalized_schema_version": {"type": "string"},
+        "source_service": {"type": "string"},
+        "source_operation": {"type": "string"},
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "rows": {"type": "array", "items": {"type": "object"}},
+    },
+    "required": ["normalized_schema_version", "columns", "rows"],
+}
+
+
 TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="get_reference_data",
@@ -292,6 +306,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=get_reference_data,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -316,6 +331,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=get_historical_data,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -334,6 +350,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=get_intraday_bars,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -351,6 +368,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=get_intraday_ticks,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -367,6 +385,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=search_instruments,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -384,6 +403,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=search_curves,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -396,6 +416,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=search_government_securities,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -408,6 +429,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=search_fields,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
     ToolSpec(
@@ -420,6 +442,7 @@ TOOLS: list[ToolSpec] = [
         ),
         scope=None,
         handler=get_market_snapshot,
+        output_schema=with_data(_TABLE_DATA),
         read_only=True,
     ),
 ]

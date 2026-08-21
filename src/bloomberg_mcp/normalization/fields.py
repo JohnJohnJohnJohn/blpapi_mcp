@@ -11,6 +11,8 @@ from bloomberg_mcp.normalization.registry import merged_sequence, stamp
 class FieldSearchNormalizer:
     schema_version = "bloomberg.field-search/1"
 
+    _CONSUMED = frozenset({"mnemonic", "description", "fieldType"})
+
     def normalize(self, messages: list[CanonicalMessage], request: CanonicalRequest) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
         for entry in merged_sequence(messages, "fieldData"):
@@ -23,6 +25,7 @@ class FieldSearchNormalizer:
                         "mnemonic": info.get("mnemonic"),
                         "description": info.get("description"),
                         "field_type": info.get("fieldType"),
+                        "extra": {k: v for k, v in info.items() if k not in self._CONSUMED},
                     }
                 )
         # Descriptions are Bloomberg-authored text: marked untrusted.
@@ -30,7 +33,7 @@ class FieldSearchNormalizer:
             request,
             self,
             {
-                "columns": ["mnemonic", "description", "field_type"],
+                "columns": ["mnemonic", "description", "field_type", "extra"],
                 "rows": rows,
                 "untrusted_text_fields": ["description"],
             },

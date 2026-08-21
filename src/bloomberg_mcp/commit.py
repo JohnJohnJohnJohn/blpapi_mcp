@@ -19,7 +19,7 @@ from pathlib import Path
 def _from_git() -> str | None:
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", "HEAD"],  # noqa: S607 - git on PATH is intentional
             cwd=str(Path(__file__).resolve().parent.parent),
             capture_output=True,
             text=True,

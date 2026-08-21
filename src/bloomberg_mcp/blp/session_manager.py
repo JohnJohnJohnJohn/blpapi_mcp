@@ -85,14 +85,46 @@ class SessionManager:
             self._loop = asyncio.get_running_loop()
             self._stopping = False
             self._state = SessionState.STARTING
-            await asyncio.to_thread(self._start_native)
-            self._generation += 1
-            self._state = SessionState.CONNECTED
-            for service in self._configured_services:
-                await self._open_native_service(service, required=True)
-            if self._on_generation_change:
-                self._on_generation_change(self._generation)
-            logger.info("bloomberg session connected (generation %d)", self._generation)
+            await self._transition(services_required=True)
+
+    async def _transition(self, *, services_required: bool) -> None:
+        """Single generation-transition coordinator (finding N5/N1-N4).
+
+        Owns the complete transition — old-session teardown, CONNECTING,
+        native start, generation bump, service reopening, CONNECTED — and
+        emits exactly one generation-change notification per transition.
+        Startup and reconnect share this path so the two can never drift.
+
+        ``services_required=True`` (startup): any service failure aborts the
+        transition and the session is never published as CONNECTED
+        (findings N2/N3). ``services_required=False`` (reconnect): a flaky
+        service logs a warning and the transition completes — a single
+        optional-service failure must not stall reconnection (finding N4).
+        """
+        session = self._session
+        if session is not None:
+            try:
+                await asyncio.to_thread(session.stop)
+            except Exception:
+                logger.debug("old session stop failed", exc_info=True)
+            self._session = None
+        self._opened_services.clear()
+        self._last_session_status = ""
+        self._state = SessionState.CONNECTING
+        await asyncio.to_thread(self._start_native)
+        self._generation += 1
+        for service in self._configured_services:
+            try:
+                await self._open_native_service(service, required=services_required)
+            except Exception:
+                if services_required:
+                    self._state = SessionState.FAILED
+                    raise
+                logger.warning("service %s did not reopen after reconnect; continuing", service)
+        self._state = SessionState.CONNECTED
+        if self._on_generation_change:
+            self._on_generation_change(self._generation)
+        logger.info("bloomberg session connected (generation %d)", self._generation)
 
     def _start_native(self) -> None:
         options = blpapi.SessionOptions()
@@ -184,21 +216,4 @@ class SessionManager:
 
     async def _reconnect_once(self) -> None:
         async with self._lock:
-            session = self._session
-            if session is not None:
-                try:
-                    await asyncio.to_thread(session.stop)
-                except Exception:
-                    logger.debug("old session stop failed", exc_info=True)
-                self._session = None
-            self._opened_services.clear()
-            self._last_session_status = ""
-            self._state = SessionState.CONNECTING
-            await asyncio.to_thread(self._start_native)
-            self._generation += 1
-            for service in self._configured_services:
-                await self._open_native_service(service, required=False)
-            self._state = SessionState.CONNECTED
-            if self._on_generation_change:
-                self._on_generation_change(self._generation)
-            logger.info("bloomberg session reconnected (generation %d)", self._generation)
+            await self._transition(services_required=False)

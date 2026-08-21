@@ -6,6 +6,7 @@ they protect the workstation and the license budget from runaway agents.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -15,6 +16,7 @@ import threading
 from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from bloomberg_mcp.config import GovernanceConfig, RequestsConfig, SubscriptionsConfig
 from bloomberg_mcp.errors import ErrorCode, GatewayError
@@ -47,10 +49,10 @@ class QuotaEngine:
         self._month_key: str = ""
         self._roll_period_locked(datetime.now(UTC))
 
-        self._consecutive_entitlement_failures = 0
-        self._entitlement_circuit_open = False
+        self._consecutive_entitlement_failures: dict[str, int] = defaultdict(int)
+        self._entitlement_circuit_open: set[str] = set()
         self._auth_failure_counter = 0
-        self._auth_failure_window: deque[float] = deque()
+        self._auth_failure_windows: dict[str, deque[float]] = defaultdict(deque)
 
         if governance.persist_usage_counters and persist_path is not None:
             self._load()
@@ -69,10 +71,12 @@ class QuotaEngine:
 
     # -------------------------------------------------------------- admission
 
-    def admit_request(self, principal_id: str, service: str, operation: str) -> None:
+    async def admit_request(self, principal_id: str, service: str, operation: str) -> None:
         """Check budgets and rate limits, then count the request.
 
-        Raises ``LICENSE_BUDGET_EXCEEDED`` or ``RATE_LIMITED``.
+        Raises ``LICENSE_BUDGET_EXCEEDED`` or ``RATE_LIMITED``. Persistence is
+        offloaded to a worker thread so the event loop is never blocked by a
+        synchronous usage-file write (finding O5).
         """
         now = datetime.now(UTC)
         with self._lock:
@@ -104,9 +108,13 @@ class QuotaEngine:
             self._by_principal_day[principal_id][key] += 1
             self._by_principal_month[principal_id][key] += 1
             self._by_service_operation[key] += 1
-            self._save_locked()
+            # Snapshot under the lock, then persist outside it: holding the
+            # threading lock across an await would block the event loop
+            # (finding O5).
+            payload = self._snapshot_payload_locked()
+        await asyncio.to_thread(self._write_payload, payload)
 
-    def admit_subscription(self, principal_id: str, active_groups: int, requested_items: int) -> None:
+    async def admit_subscription(self, principal_id: str, active_groups: int, requested_items: int) -> None:
         if active_groups >= self._subscriptions.maximum_per_principal:
             raise GatewayError(
                 ErrorCode.SUBSCRIPTION_LIMIT_EXCEEDED,
@@ -121,55 +129,65 @@ class QuotaEngine:
     # ---------------------------------------------------------- auth failures
 
     def admit_auth_attempt(self, client_address: str) -> None:
-        """Rate-limit authentication failures per client address (SPEC §1.7)."""
+        """Rate-limit authentication attempts per client address (SPEC §1.7).
+
+        Finding M5/M6: previously a no-op; now a per-address admission gate
+        that raises ``RATE_LIMITED`` when the address's failure window is full.
+        """
         now = datetime.now(UTC).timestamp()
         with self._lock:
-            window = self._auth_failure_window
+            window = self._auth_failure_windows[client_address]
             cutoff = now - _RATE_WINDOW_SECONDS
             while window and window[0] < cutoff:
                 window.popleft()
+            if len(window) >= self._governance.auth_failure_rate_limit:
+                raise GatewayError(
+                    ErrorCode.RATE_LIMITED,
+                    "Too many authentication attempts; try again later.",
+                    retryable=True,
+                )
 
     def record_auth_failure(self, client_address: str) -> bool:
-        """Record a failed authentication; returns True when now rate-limited."""
+        """Record a failed authentication per address; True when rate-limited."""
         now = datetime.now(UTC).timestamp()
         with self._lock:
             self._auth_failure_counter += 1
-            self._auth_failure_window.append(now)
+            window = self._auth_failure_windows[client_address]
+            window.append(now)
             cutoff = now - _RATE_WINDOW_SECONDS
-            while self._auth_failure_window and self._auth_failure_window[0] < cutoff:
-                self._auth_failure_window.popleft()
-            return len(self._auth_failure_window) >= 20
+            while window and window[0] < cutoff:
+                window.popleft()
+            return len(window) >= self._governance.auth_failure_rate_limit
 
     # ------------------------------------------------------ entitlement state
 
-    def record_entitlement_failure(self) -> None:
+    def record_entitlement_failure(self, service: str) -> None:
         with self._lock:
-            self._consecutive_entitlement_failures += 1
+            self._consecutive_entitlement_failures[service] += 1
             if (
-                self._consecutive_entitlement_failures
+                self._consecutive_entitlement_failures[service]
                 >= self._governance.entitlement_failure_circuit_threshold
             ):
-                if not self._entitlement_circuit_open:
-                    logger.warning("entitlement circuit breaker OPEN")
-                self._entitlement_circuit_open = True
+                if service not in self._entitlement_circuit_open:
+                    logger.warning("entitlement circuit breaker OPEN for %s", service)
+                self._entitlement_circuit_open.add(service)
 
-    def record_entitlement_success(self) -> None:
+    def record_entitlement_success(self, service: str) -> None:
         with self._lock:
-            self._consecutive_entitlement_failures = 0
-            # A successful entitled exchange is the health-probe path that can
-            # close the breaker without operator intervention (SPEC §1.8).
-            self._entitlement_circuit_open = False
+            # Only the matching service family can close its own breaker;
+            # unrelated successes never do (finding K3).
+            self._consecutive_entitlement_failures[service] = 0
+            self._entitlement_circuit_open.discard(service)
 
     def reset_entitlement_circuit(self) -> None:
-        """Operator intervention closes the breaker (SPEC §1.8)."""
+        """Operator intervention closes all breakers (SPEC §1.8)."""
         with self._lock:
-            self._consecutive_entitlement_failures = 0
-            self._entitlement_circuit_open = False
+            self._consecutive_entitlement_failures.clear()
+            self._entitlement_circuit_open.clear()
 
-    @property
-    def entitlement_circuit_open(self) -> bool:
+    def entitlement_circuit_open(self, service: str) -> bool:
         with self._lock:
-            return self._entitlement_circuit_open
+            return service in self._entitlement_circuit_open
 
     # ---------------------------------------------------------------- metrics
 
@@ -182,7 +200,7 @@ class QuotaEngine:
                 "governance_requests_month": sum(
                     sum(v.values()) for v in self._by_principal_month.values()
                 ),
-                "entitlement_circuit_open": self._entitlement_circuit_open,
+                "entitlement_circuit_open": bool(self._entitlement_circuit_open),
                 "auth_failures_total": self._auth_failure_counter,
             }
 
@@ -204,15 +222,18 @@ class QuotaEngine:
                 for key, count in entries.items():
                     self._by_principal_month[principal][key] = int(count)
 
-    def _save_locked(self) -> None:
-        if not self._governance.persist_usage_counters or self._persist_path is None:
-            return
-        payload = {
+    def _snapshot_payload_locked(self) -> dict[str, Any]:
+        """Best-effort persistence snapshot; must be called under the lock."""
+        return {
             "day": self._day_key,
             "month": self._month_key,
             "daily": {p: dict(v) for p, v in self._by_principal_day.items()},
             "monthly": {p: dict(v) for p, v in self._by_principal_month.items()},
         }
+
+    def _write_payload(self, payload: dict[str, Any]) -> None:
+        if not self._governance.persist_usage_counters or self._persist_path is None:
+            return
         try:
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=str(self._persist_path.parent), prefix=".usage-")

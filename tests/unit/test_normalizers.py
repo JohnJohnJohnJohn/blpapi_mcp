@@ -7,8 +7,6 @@ Shapes captured from the live gateway 2026-08-21: single-sequence objects
 
 from __future__ import annotations
 
-import datetime as dt
-
 from bloomberg_mcp.models import CanonicalMessage, CanonicalRequest, EventKind, RequestCost, ResponseMode
 from bloomberg_mcp.normalization.historical import HistoricalNormalizer
 from bloomberg_mcp.normalization.instruments import (
@@ -85,8 +83,22 @@ def test_intraday_bar_normalizer() -> None:
                 "barData": {
                     "eidData": None,
                     "barTickData": [
-                        {"time": "2026-08-20T17:30:00", "open": 311.0, "high": 312.0, "low": 310.5, "close": 311.5, "volume": 1000},
-                        {"time": "2026-08-20T17:35:00", "open": 311.5, "high": 313.0, "low": 311.0, "close": 312.8, "volume": 800},
+                        {
+                            "time": "2026-08-20T17:30:00",
+                            "open": 311.0,
+                            "high": 312.0,
+                            "low": 310.5,
+                            "close": 311.5,
+                            "volume": 1000,
+                        },
+                        {
+                            "time": "2026-08-20T17:35:00",
+                            "open": 311.5,
+                            "high": 313.0,
+                            "low": 311.0,
+                            "close": 312.8,
+                            "volume": 800,
+                        },
                     ],
                 }
             }
@@ -139,7 +151,12 @@ def test_instrument_search_normalizer() -> None:
     data = InstrumentSearchNormalizer().normalize(
         messages, _request("instrumentListRequest", {"query": "Apple"})
     )
-    assert data["rows"][0] == {"name": "Apple Inc (U.S.)", "yellow_key": "equity"}
+    assert data["rows"][0] == {
+        "name": "Apple Inc (U.S.)",
+        "security": "AAPL US<equity>",
+        "yellow_key": "equity",
+        "extra": {},
+    }
     assert data["rows"][1]["yellow_key"] == "equity"
 
 
@@ -159,7 +176,13 @@ def test_curve_search_normalizer() -> None:
         )
     ]
     data = CurveSearchNormalizer().normalize(messages, _request("curveListRequest", {"currencyCode": "USD"}))
-    assert data["rows"][0] == {"name": "YCGT0025 Index", "country": "US", "currency": "USD"}
+    assert data["rows"][0] == {
+        "name": "YCGT0025 Index",
+        "curve": "YCGT0025 Index",
+        "country": "US",
+        "currency": "USD",
+        "extra": {},
+    }
 
 
 def test_govt_search_normalizer() -> None:

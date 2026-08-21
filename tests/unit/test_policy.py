@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -100,10 +101,10 @@ def test_quota_budget_exhaustion() -> None:
         RequestsConfig(),
         SubscriptionsConfig(),
     )
-    quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest")
-    quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest")
+    asyncio.run(quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest"))
+    asyncio.run(quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest"))
     with pytest.raises(GatewayError) as excinfo:
-        quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest")
+        asyncio.run(quota.admit_request("hermes", "//blp/refdata", "ReferenceDataRequest"))
     assert excinfo.value.code is ErrorCode.LICENSE_BUDGET_EXCEEDED
 
 
@@ -113,18 +114,20 @@ def test_entitlement_circuit_breaker() -> None:
         RequestsConfig(),
         SubscriptionsConfig(),
     )
-    assert not quota.entitlement_circuit_open
+    assert not quota.entitlement_circuit_open("//blp/refdata")
     for _ in range(3):
-        quota.record_entitlement_failure()
-    assert quota.entitlement_circuit_open
-    # Successful entitled exchange closes the breaker (health probe path).
-    quota.record_entitlement_success()
-    assert not quota.entitlement_circuit_open
+        quota.record_entitlement_failure("//blp/refdata")
+    assert quota.entitlement_circuit_open("//blp/refdata")
+    # Unrelated services are not affected by the refdata breaker (finding K3).
+    assert not quota.entitlement_circuit_open("//blp/instruments")
+    # Successful entitled exchange closes this family's breaker (health probe).
+    quota.record_entitlement_success("//blp/refdata")
+    assert not quota.entitlement_circuit_open("//blp/refdata")
     for _ in range(3):
-        quota.record_entitlement_failure()
-    assert quota.entitlement_circuit_open
+        quota.record_entitlement_failure("//blp/refdata")
+    assert quota.entitlement_circuit_open("//blp/refdata")
     quota.reset_entitlement_circuit()
-    assert not quota.entitlement_circuit_open
+    assert not quota.entitlement_circuit_open("//blp/refdata")
 
 
 def test_subscription_limits() -> None:
@@ -132,5 +135,5 @@ def test_subscription_limits() -> None:
         GovernanceConfig(persist_usage_counters=False), RequestsConfig(), SubscriptionsConfig(maximum_per_principal=1)
     )
     with pytest.raises(GatewayError) as excinfo:
-        quota.admit_subscription("hermes", active_groups=1, requested_items=1)
+        asyncio.run(quota.admit_subscription("hermes", active_groups=1, requested_items=1))
     assert excinfo.value.code is ErrorCode.SUBSCRIPTION_LIMIT_EXCEEDED

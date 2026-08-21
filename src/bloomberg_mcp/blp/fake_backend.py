@@ -62,6 +62,16 @@ def _date(name: str, **kw: Any) -> ElementDescriptor:
     return ElementDescriptor(name=name, datatype=BloombergDatatype.DATE, **kw)
 
 
+def _dt(name: str, **kw: Any) -> ElementDescriptor:
+    kw.setdefault("max_values", 1)
+    return ElementDescriptor(name=name, datatype=BloombergDatatype.DATETIME, **kw)
+
+
+def _b(name: str, **kw: Any) -> ElementDescriptor:
+    kw.setdefault("max_values", 1)
+    return ElementDescriptor(name=name, datatype=BloombergDatatype.BOOL, **kw)
+
+
 def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, OperationDescriptor]]:
     """Build the fake service/operation schema catalog."""
     security_error = _seq(
@@ -165,7 +175,7 @@ def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, Operation
                     security_error,
                     _seq(
                         "barTickData",
-                        (_date("time"), _f64("open"), _f64("high"), _f64("low"), _f64("close"), _i64("volume")),
+                        (_dt("time"), _f64("open"), _f64("high"), _f64("low"), _f64("close"), _i64("volume")),
                         max_values=None,
                         type_name="BarTickData",
                     ),
@@ -195,7 +205,7 @@ def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, Operation
                     security_error,
                     _seq(
                         "tickData",
-                        (_date("time"), _s("type"), _f64("value"), _i64("size")),
+                        (_dt("time"), _s("type"), _f64("value"), _i64("size")),
                         max_values=None,
                         type_name="TickData",
                     ),
@@ -207,7 +217,7 @@ def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, Operation
 
     instrument_request = _seq(
         "instrumentListRequest",
-        (_s("query", min_values=1), _s("yellowKeyFilters", max_values=None), _s("maxResults")),
+        (_s("query"), _s("yellowKeyFilter"), _s("languageOverride"), _i64("maxResults")),
         type_name="instrumentListRequest",
     )
     instrument_response = _seq(
@@ -215,7 +225,7 @@ def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, Operation
         (
             _seq(
                 "results",
-                (_s("name"), _s("yellowKey"), _seq("partialMatch", (), max_values=None)),
+                (_s("security"), _s("description"), _s("yellowKey")),
                 max_values=None,
             ),
         ),
@@ -224,29 +234,29 @@ def _build_fake_operations(schema_variant: int) -> dict[str, dict[str, Operation
 
     curve_request = _seq(
         "curveListRequest",
-        (_s("currency", min_values=1), _s("country"), _s("type"), _s("maxResults")),
+        (_s("query"), _i64("maxResults"), _s("countryCode"), _s("currencyCode"), _s("type")),
         type_name="curveListRequest",
     )
     curve_response = _seq(
         "curveListResponse",
-        (_seq("curveList", (_s("name"), _s("country"), _s("currency")), max_values=None),),
+        (_seq("results", (_s("curve"), _s("description"), _s("country"), _s("currency")), max_values=None),),
         type_name="curveListResponse",
     )
 
     govt_request = _seq(
         "govtListRequest",
-        (_s("country", min_values=1), _s("maxResults")),
+        (_s("query"), _s("ticker"), _b("partialMatch"), _i64("maxResults")),
         type_name="govtListRequest",
     )
     govt_response = _seq(
         "govtListResponse",
-        (_seq("govtList", (_s("name"), _s("country")), max_values=None),),
+        (_seq("results", (_s("parseky"), _s("name"), _s("ticker"), _s("country")), max_values=None),),
         type_name="govtListResponse",
     )
 
     field_search_request = _seq(
         "FieldSearchRequest",
-        (_s("searchSpec", min_values=1), _s("maxResults")),
+        (_s("searchSpec", min_values=1),),
         type_name="FieldSearchRequest",
     )
     field_search_response = _seq(
@@ -424,7 +434,9 @@ class FakeBloombergBackend(BloombergBackend):
         self._token_counter += 1
         return self._token_counter
 
-    async def submit_request(self, request: CanonicalRequest, external_request_id: str) -> ExecutionHandle:
+    async def submit_request(
+        self, request: CanonicalRequest, external_request_id: str, deadline_seconds: int | None = None
+    ) -> ExecutionHandle:
         await self.require_connected()
         if self.session_state is not SessionState.CONNECTED:
             raise GatewayError(ErrorCode.BLOOMBERG_NOT_CONNECTED, "Session not connected.", retryable=True)
@@ -432,11 +444,16 @@ class FakeBloombergBackend(BloombergBackend):
         queue: asyncio.Queue[Any] = asyncio.Queue()
         generation = self._generation
         task = asyncio.get_running_loop().create_task(
-            self._run_request(token, generation, request, external_request_id, queue)
+            self._run_request(token, generation, request, external_request_id, queue, deadline_seconds)
         )
         self._active_requests[token] = task
         self._active_queues[token] = queue
         return ExecutionHandle(native_token=token, session_generation=generation, messages=queue)
+
+    async def release_request(self, native_token: int) -> None:
+        """Idempotent lease release for the fake backend."""
+        self._active_requests.pop(native_token, None)
+        self._active_queues.pop(native_token, None)
 
     async def _run_request(
         self,
@@ -445,6 +462,7 @@ class FakeBloombergBackend(BloombergBackend):
         request: CanonicalRequest,
         request_id: str,
         queue: asyncio.Queue[Any],
+        deadline_seconds: int | None = None,
     ) -> None:
         try:
             if self.response_delay_seconds:
@@ -520,15 +538,50 @@ class FakeBloombergBackend(BloombergBackend):
         if operation == "IntradayTickRequest":
             return self._intraday_tick_payload(params)
         if operation == "instrumentListRequest":
-            return {"results": [{"name": "FAKE TEST EQUITY", "yellowKey": "YK_EQTY"}]}
+            return {
+                "results": [
+                    {"security": "AAPL US<equity>", "description": "Apple Inc (U.S.)"},
+                    {"security": "MSFT US<equity>", "description": "Microsoft Corp"},
+                    {"security": "AAPL CORP<corp>", "description": "Apple Inc (Multiple Matches)"},
+                ]
+            }
         if operation == "curveListRequest":
-            return {"curveList": [{"name": "US Treasury", "country": "US", "currency": "USD"}]}
+            return {
+                "results": [
+                    {
+                        "curve": "YCGT0025 Index",
+                        "description": "US Treasury Actives Curve",
+                        "country": "US",
+                        "currency": "USD",
+                    },
+                    {
+                        "curve": "YCGT0012 Index",
+                        "description": "US Treasury Generic Rates",
+                        "country": "US",
+                        "currency": "USD",
+                    },
+                    {
+                        "curve": "YCSW0005 Index",
+                        "description": "Swiss Franc Sovereign Curve",
+                        "country": "CH",
+                        "currency": "CHF",
+                    },
+                ]
+            }
         if operation == "govtListRequest":
-            return {"govtList": [{"name": "US T 4.25 08/15/2034", "country": "US"}]}
+            return {
+                "results": [
+                    {"parseky": "91282CRF Govt", "name": "United States Treasury Note/Bond", "ticker": "T"},
+                    {"parseky": "91282CEX Govt", "name": "United States Treasury Bill", "ticker": "B"},
+                    {"parseky": "912810TW Govt", "name": "United States Treasury Note/Bond", "ticker": "T"},
+                ]
+            }
         if operation == "FieldSearchRequest":
             return {
                 "fieldData": [
-                    {"fieldInfo": {"mnemonic": "PX_LAST", "description": "Last price", "fieldType": "Price"}}
+                    {"fieldInfo": {"mnemonic": "PX_LAST", "description": "Last Price"}},
+                    {"fieldInfo": {"mnemonic": "PX_OPEN", "description": "Open Price"}},
+                    {"fieldInfo": {"mnemonic": "PX_VOLUME", "description": "Volume"}},
                 ]
             }
         return {}
@@ -637,17 +690,15 @@ class FakeBloombergBackend(BloombergBackend):
             except ValueError:
                 year, month, day = 2026, 1, 1
             for row in range(5):
-                value = base + row * 0.5
+                date_text = f"{year:04d}-{month:02d}-{min(day + row, 28):02d}"
+                # Column-wide rows matching the live shape: one dict per date,
+                # requested fields as keys (finding H1).
+                date_value: Any = {"$blp_type": "DATE", "value": date_text} if typed else date_text
+                row_data: dict[str, Any] = {"date": date_value}
                 for field in fields:
-                    date_text = f"{year:04d}-{month:02d}-{min(day + row, 28):02d}"
-                    date_value: Any = {"$blp_type": "DATE", "value": date_text} if typed else date_text
-                    rows.append(
-                        {
-                            "date": date_value,
-                            "field": str(field),
-                            "value": round(value, 2),
-                        }
-                    )
+                    value = base + row * 0.5 + (row % 3) * 0.25
+                    row_data[str(field)] = round(value, 2)
+                rows.append(row_data)
             entry["fieldData"] = rows
             entries.append(entry)
         return {"securityData": entries}
@@ -659,7 +710,8 @@ class FakeBloombergBackend(BloombergBackend):
         for hour in range(9, 12):
             bars.append(
                 {
-                    "time": "2026-08-20",
+                    # Canonical decoder emits naive ISO datetimes (SPEC §2.12).
+                    "time": f"2026-08-20T{hour:02d}:00:00",
                     "open": base,
                     "high": round(base + 2.0, 1),
                     "low": round(base - 1.5, 1),
@@ -673,8 +725,8 @@ class FakeBloombergBackend(BloombergBackend):
         security = str(params.get("security", "FAKE Equity"))
         base = self._deterministic_value(security)
         ticks = [
-            {"time": "2026-08-20", "type": "TRADE", "value": base, "size": 100},
-            {"time": "2026-08-20", "type": "TRADE", "value": round(base + 0.1, 1), "size": 200},
+            {"time": "2026-08-20T09:00:00", "type": "TRADE", "value": base, "size": 100},
+            {"time": "2026-08-20T09:00:01", "type": "TRADE", "value": round(base + 0.1, 1), "size": 200},
         ]
         return {"tickData": {"security": security, "tickData": ticks}}
 

@@ -38,7 +38,7 @@ def read_event_queue(
     generation: int,
     deadline: float,
     session_state: Callable[[], SessionState],
-    on_entitlement_failure: EntitlementCallback | None,
+    is_stopping: Callable[[], bool] | None = None,
     *,
     typed: bool = False,
 ) -> None:
@@ -46,10 +46,14 @@ def read_event_queue(
 
     ``typed`` selects typed decoding ($blp_type tags) for response_mode=typed
     requests; the tagged payloads are emitted verbatim by the typed finalizer.
+    ``is_stopping`` lets gateway shutdown signal the reader to exit at its
+    next loop iteration instead of running to the deadline.
     """
     sequence = 0
     try:
         while True:
+            if is_stopping is not None and is_stopping():
+                return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 _put(loop, queue, GatewayError(ErrorCode.TIMEOUT, "Bloomberg request timed out.", retryable=True))
@@ -70,7 +74,7 @@ def read_event_queue(
             terminal: GatewayError | None = None
             for message in messages:
                 if message.event_type is EventKind.REQUEST_STATUS:
-                    terminal = request_status_error(message, on_entitlement_failure)
+                    terminal = request_status_error(message)
                 _put(loop, queue, message if terminal is None else terminal)
                 if message.event_type is EventKind.RESPONSE:
                     return
@@ -102,10 +106,13 @@ def _put(loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[Any], item: Any) 
         loop.call_soon_threadsafe(queue.put_nowait, item)
 
 
-def request_status_error(
-    message: CanonicalMessage, on_entitlement_failure: EntitlementCallback | None
-) -> GatewayError:
-    """Map a REQUEST_STATUS message onto the stable application error set."""
+def request_status_error(message: CanonicalMessage) -> GatewayError:
+    """Map a REQUEST_STATUS message onto the stable application error set.
+
+    Entitlement accounting (finding K1) happens at a single point — the
+    consumer's queue path in ``RequestExecutor._consume`` — never here, so a
+    single NO_AUTH REQUEST_STATUS cannot be counted twice.
+    """
     payload = message.payload
     reason = payload.get("reason") if isinstance(payload, Mapping) else None
     category = ""
@@ -114,8 +121,6 @@ def request_status_error(
         category = str(reason.get("category") or "")
         description = str(reason.get("description") or description)
     if category == "NO_AUTH":
-        if on_entitlement_failure is not None:
-            on_entitlement_failure()
         return GatewayError(
             ErrorCode.BLOOMBERG_NOT_ENTITLED,
             "Not entitled to the requested data.",

@@ -145,6 +145,8 @@ class SubscriptionsConfig:
     maximum_long_poll_seconds: int = 15
     maximum_concurrent_long_polls: int = 10
     restore_after_reconnect: bool = True
+    cursor_ttl_seconds: int = 3_600
+    maximum_cursors_per_subscription: int = 1_000
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,12 @@ class AuthConfig:
     mcp_oauth_compliant: bool = False
     token_source: str = "env"  # noqa: S105 - env | file | windows_credential_manager
     token_file: str = ""
+    #: Optional explicit principal binding for the bearer token (finding M1):
+    #: with multiple policy principals and no binding, startup refuses.
+    principal_id: str = ""
+    #: Optional genuinely separate source for the PREVIOUS token (finding M3);
+    #: only meaningful for the file token source.
+    previous_token_file: str = ""
     credential_target: str = "BloombergMCP/bearer"
     token_overlap_seconds: int = 3_600
 
@@ -172,6 +180,7 @@ class GovernanceConfig:
     daily_request_budget: int = 10_000
     monthly_request_budget: int = 200_000
     entitlement_failure_circuit_threshold: int = 5
+    auth_failure_rate_limit: int = 20
     persist_usage_counters: bool = True
     persist_result_artifacts: bool = True
 

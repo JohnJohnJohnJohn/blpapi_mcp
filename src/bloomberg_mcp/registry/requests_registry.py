@@ -9,6 +9,10 @@ from bloomberg_mcp.models import COMPLETE_REQUEST_STATUSES, RequestRecord, utc_n
 
 MAX_RECORDS = 10_000
 
+# Statuses that count against the in-flight admission bound: pre-execution
+# (RECEIVED), queued (QUEUED) and actively running (SENT/PARTIAL/CANCELLING).
+_IN_FLIGHT_STATUSES = {"RECEIVED", "QUEUED", "SENT", "PARTIAL", "CANCELLING"}
+
 
 class RequestRegistry:
     def __init__(self) -> None:
@@ -23,12 +27,42 @@ class RequestRegistry:
             if len(self._records) > MAX_RECORDS:
                 self._evict_locked()
 
+    def try_register(self, record: RequestRecord, max_total: int) -> bool:
+        """Atomically admit a new request iff in-flight headroom remains.
+
+        The count and the insertion happen under the same lock, so two
+        concurrent submits cannot both pass the bound (finding D).
+        """
+        with self._lock:
+            in_flight = sum(1 for rec in self._records.values() if rec.status.value in _IN_FLIGHT_STATUSES)
+            if in_flight >= max_total:
+                return False
+            self._records[record.request_id] = record
+            if len(self._records) > MAX_RECORDS:
+                self._evict_locked()
+            return True
+
+    def unregister(self, request_id: str) -> None:
+        """Remove a record that never ran (e.g. quota-denied after admission)."""
+        with self._lock:
+            self._records.pop(request_id, None)
+
     def _evict_locked(self) -> None:
-        complete = [
-            (rid, rec) for rid, rec in self._records.items() if rec.status in COMPLETE_REQUEST_STATUSES
-        ]
-        complete.sort(key=lambda pair: pair[1].created_at)
-        for rid, _ in complete[: len(self._records) - MAX_RECORDS]:
+        overflow = len(self._records) - MAX_RECORDS
+        if overflow <= 0:
+            return
+        # Prefer evicting the oldest non-in-flight records (completed first,
+        # then pre-execution RECEIVED/QUEUED); never evict SENT/PARTIAL/CANCELLING.
+        never_evict = {"SENT", "PARTIAL", "CANCELLING"}
+        candidates = sorted(
+            (
+                (rid, rec)
+                for rid, rec in self._records.items()
+                if rec.status.value not in never_evict
+            ),
+            key=lambda pair: pair[1].created_at,
+        )
+        for rid, _ in candidates[:overflow]:
             self._records.pop(rid, None)
 
     def get(self, request_id: str, principal_id: str, *, admin: bool = False) -> RequestRecord | None:
@@ -74,11 +108,20 @@ class RequestRegistry:
                 return None
             return request_id
 
-    def sweep(self) -> int:
+    def sweep(self, record_ttl_seconds: int | None = None) -> int:
         now = utc_now()
         removed = 0
         with self._lock:
             for key in [k for k, (_, expires) in self._dedup.items() if now >= expires]:  # type: ignore[operator]
                 self._dedup.pop(key, None)
                 removed += 1
+            if record_ttl_seconds is not None and record_ttl_seconds > 0:
+                for rid, rec in list(self._records.items()):
+                    if (
+                        rec.status.value in COMPLETE_REQUEST_STATUSES
+                        and rec.expires_at is not None
+                        and now >= rec.expires_at
+                    ):
+                        self._records.pop(rid, None)
+                        removed += 1
         return removed

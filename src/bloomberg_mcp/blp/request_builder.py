@@ -11,7 +11,6 @@ Native methods used (blpapi 3.26.7.1): ``Service.createRequest``,
 from __future__ import annotations
 
 import logging
-
 from collections.abc import Mapping
 from typing import Any
 

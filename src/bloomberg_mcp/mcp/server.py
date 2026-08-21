@@ -30,9 +30,9 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from bloomberg_mcp import PROTOCOL_REVISION, __version__
-from bloomberg_mcp.commit import COMMIT
 from bloomberg_mcp.auth.middleware import BearerAuthMiddleware, current_principal
 from bloomberg_mcp.auth.token_verifier import TokenVerifier
+from bloomberg_mcp.commit import COMMIT
 from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.gateway import Gateway
 from bloomberg_mcp.mcp import (
@@ -146,7 +146,7 @@ def build_mcp_handlers(gateway: Gateway, tools: dict[str, ToolSpec]) -> dict[str
                     title=tool.title,
                     description=tool.description,
                     input_schema=tool.input_schema,
-                    output_schema=ENVELOPE_SCHEMA,
+                    output_schema=tool.output_schema or ENVELOPE_SCHEMA,
                     annotations=types.ToolAnnotations(
                         read_only_hint=tool.read_only,
                         destructive_hint=False,
@@ -229,10 +229,33 @@ def build_mcp_handlers(gateway: Gateway, tools: dict[str, ToolSpec]) -> dict[str
 
         gateway.audit.record(_tool_audit_event(principal.principal_id, params.name, None))
         return types.CallToolResult(
-            content=[types.TextContent(type="text", text=_summary_text(payload))],
+            content=_result_content_blocks(payload),
             structured_content=payload,
             is_error=payload.get("ok") is False and isinstance(payload.get("error"), dict),
         )
+
+    def _result_content_blocks(payload: dict[str, Any]) -> list[Any]:
+        """Tool-result content: summary text plus an MCP resource-link block
+        when the result is artifact-backed (finding L3: URI strings become
+        real EmbeddedResource content blocks)."""
+        content: list[Any] = [types.TextContent(type="text", text=_summary_text(payload))]
+        data = payload.get("data")
+        artifact = data.get("artifact") if isinstance(data, dict) else None
+        if isinstance(artifact, dict):
+            resource_uri = artifact.get("resource_uri") or ""
+            mime_type = artifact.get("content_type") or "application/json"
+            preview = data.get("preview")  # type: ignore[union-attr]
+            content.append(
+                types.EmbeddedResource(
+                    type="resource",
+                    resource=types.TextResourceContents(
+                        uri=resource_uri,
+                        mime_type=mime_type,
+                        text=str(preview) if preview is not None else "",
+                    ),
+                )
+            )
+        return content
 
     async def on_list_resources(ctx: Any, params: Any) -> types.ListResourcesResult:
         static, _ = resources.list_resources_payload()

@@ -60,6 +60,7 @@ class _GroupRuntime:
     waiters: list[asyncio.Future[None]] = field(default_factory=list)
     max_events: int = 10_000
     ttl_seconds: int = 3_600
+    read_mode: str = "latest_and_changes"
 
 
 class SubscriptionRegistry:
@@ -76,6 +77,7 @@ class SubscriptionRegistry:
         self._subscription_service = subscription_service
         self._groups: dict[str, _GroupRuntime] = {}
         self._token_map: dict[int, tuple[str, str]] = {}
+        self._pending_unsubscribes: set[int] = set()
         self._token_counter = 0
         self._long_polls = asyncio.Semaphore(config.maximum_concurrent_long_polls)
         backend.set_subscription_sink(self.handle_event)
@@ -105,6 +107,7 @@ class SubscriptionRegistry:
 
         max_events = self._config.maximum_buffered_events
         ttl_seconds = self._config.default_ttl_seconds
+        read_mode = "latest_and_changes"
         if retention:
             requested_events = retention.get("max_events")
             if isinstance(requested_events, int) and requested_events > 0:
@@ -112,6 +115,11 @@ class SubscriptionRegistry:
             requested_ttl = retention.get("ttl_seconds")
             if isinstance(requested_ttl, int) and requested_ttl > 0:
                 ttl_seconds = min(requested_ttl, self._config.maximum_ttl_seconds)
+            requested_mode = retention.get("mode")
+            if requested_mode is not None:
+                if requested_mode not in ("latest_and_changes", "changes_only", "latest_only"):
+                    raise GatewayError(ErrorCode.INVALID_ARGUMENT, f"Unknown retention mode {requested_mode!r}.")
+                read_mode = requested_mode
 
         group = SubscriptionGroup(
             subscription_id=f"sub_{secrets.token_urlsafe(12)}",
@@ -145,7 +153,7 @@ class SubscriptionRegistry:
             items_payload.append({"topic": topic, "fields": list(fields), "options": options})
             tokens.append(token)
 
-        runtime = _GroupRuntime(group=group, max_events=max_events, ttl_seconds=ttl_seconds)
+        runtime = _GroupRuntime(group=group, max_events=max_events, ttl_seconds=ttl_seconds, read_mode=read_mode)
         self._groups[group.subscription_id] = runtime
         try:
             await self._backend.subscribe(items_payload, tokens)
@@ -266,6 +274,14 @@ class SubscriptionRegistry:
             raise GatewayError(ErrorCode.SUBSCRIPTION_EXPIRED, "Subscription is no longer active.")
         if generation is not None and generation != group.generation:
             raise GatewayError(ErrorCode.CURSOR_INVALID, "Subscription generation has changed.")
+        if mode == "latest" and runtime.read_mode == "changes_only":
+            raise GatewayError(
+                ErrorCode.INVALID_ARGUMENT, "This subscription retains changes only (retention.mode=changes_only)."
+            )
+        if mode == "changes" and runtime.read_mode == "latest_only":
+            raise GatewayError(
+                ErrorCode.INVALID_ARGUMENT, "This subscription retains latest values only (retention.mode=latest_only)."
+            )
         self._warn_if_stuck_starting(runtime)
 
         if mode == "latest":
@@ -286,7 +302,7 @@ class SubscriptionRegistry:
         offset = 0
         cursor = None
         if cursor_id is not None:
-            cursor = self._cursors.resolve(cursor_id)
+            cursor = self._cursors.resolve(cursor_id, principal_id=principal_id)
             if cursor is None or cursor.subscription_id != subscription_id or cursor.generation != group.generation:
                 raise GatewayError(ErrorCode.CURSOR_INVALID, "Cursor is invalid for this subscription generation.")
             offset = cursor.offset
@@ -315,7 +331,24 @@ class SubscriptionRegistry:
             for _, e in page
         ]
         new_offset = (page[-1][0] + 1) if page else offset
-        new_cursor = self._cursors.create(subscription_id, group.generation, new_offset)
+        # Consume-on-use: the old handle is replaced atomically; replaying it
+        # afterwards fails with CURSOR_INVALID. Explicit data-gap reporting:
+        # if the requested offset fell outside the retained window, say so.
+        gap = offset < base
+        if cursor is not None:
+            new_cursor = self._cursors.consume(
+                cursor,
+                new_offset,
+                ttl_seconds=self._config.cursor_ttl_seconds,
+            )
+        else:
+            new_cursor = self._cursors.create(
+                subscription_id,
+                group.generation,
+                new_offset,
+                principal_id=principal_id,
+                ttl_seconds=self._config.cursor_ttl_seconds,
+            )
         return {
             "subscription_id": subscription_id,
             "generation": group.generation,
@@ -323,6 +356,7 @@ class SubscriptionRegistry:
             "events": events,
             "dropped_events": group.dropped_events,
             "cursor": new_cursor.cursor_id,
+            "data_gap": gap,
         }
 
     async def _wait_for_events(self, runtime: _GroupRuntime, offset: int, timeout_seconds: float) -> None:
@@ -356,23 +390,10 @@ class SubscriptionRegistry:
         if len(subscriptions) > self._config.maximum_topics_per_group:
             raise GatewayError(ErrorCode.SUBSCRIPTION_LIMIT_EXCEEDED, "Too many topics in one group.")
 
-        old_tokens = [item.native_token for item in group.items.values()]
-        try:
-            await self._backend.unsubscribe(old_tokens)
-        except Exception:
-            logger.debug("unsubscribe of replaced subscriptions failed", exc_info=True)
-        for token in old_tokens:
-            self._token_map.pop(token, None)
-
-        group.generation += 1
-        group.status = SubscriptionGroupStatus.RESUBSCRIBING
-        group.items.clear()
-        group.restored_with_gap = True
-        runtime.buffer.clear()
-        runtime.latest.clear()
-        runtime.total_events = 0
-        self._cursors.invalidate_subscription(subscription_id)
-
+        # Phase 1 — validate and construct the prospective state WITHOUT
+        # touching the live group (transactional: a failed replacement must
+        # leave the old subscription fully intact).
+        prospective_items: list[tuple[SubscriptionItem, int]] = []
         items_payload: list[dict[str, Any]] = []
         tokens: list[int] = []
         for spec in subscriptions:
@@ -380,6 +401,8 @@ class SubscriptionRegistry:
             if not topic:
                 raise GatewayError(ErrorCode.INVALID_ARGUMENT, "Subscription topic must be non-empty.")
             fields = tuple(str(f) for f in (spec.get("fields") or []))
+            if len(fields) > self._config.maximum_fields_per_topic:
+                raise GatewayError(ErrorCode.SUBSCRIPTION_LIMIT_EXCEEDED, "Too many fields for one topic.")
             options = {str(k): str(v) for k, v in (spec.get("options") or {}).items()}
             token = self._allocate_token()
             item = SubscriptionItem(
@@ -390,11 +413,45 @@ class SubscriptionRegistry:
                 native_token=token,
                 status=SubscriptionItemStatus.STARTING,
             )
-            group.items[item.item_id] = item
-            self._token_map[token] = (group.subscription_id, item.item_id)
+            prospective_items.append((item, token))
             items_payload.append({"topic": topic, "fields": list(fields), "options": options})
             tokens.append(token)
-        await self._backend.subscribe(items_payload, tokens)
+
+        # Phase 2 — subscribe the NEW native feeds before retiring the old ones.
+        try:
+            await self._backend.subscribe(items_payload, tokens)
+        except Exception as exc:
+            # Rollback: release any partially-subscribed new tokens; the old
+            # group state is untouched.
+            try:
+                await self._backend.unsubscribe(tokens)
+            except Exception:
+                logger.warning("rollback unsubscribe failed for %s", subscription_id, exc_info=True)
+            for token in tokens:
+                self._token_map.pop(token, None)
+            raise GatewayError(
+                ErrorCode.BLOOMBERG_SUBSCRIPTION_FAILED,
+                "Bloomberg rejected the resubscription request.",
+                retryable=True,
+            ) from exc
+
+        # Phase 3 — commit: swap items, retire old native feeds (async teardown).
+        old_tokens = [item.native_token for item in group.items.values()]
+        group.generation += 1
+        group.status = SubscriptionGroupStatus.STARTING
+        group.items.clear()
+        for old_token in old_tokens:
+            self._token_map.pop(old_token, None)
+        if old_tokens:
+            self._pending_unsubscribes.update(old_tokens)
+        group.restored_with_gap = True
+        runtime.buffer.clear()
+        runtime.latest.clear()
+        runtime.total_events = 0
+        self._cursors.invalidate_subscription(subscription_id)
+        for item, token in prospective_items:
+            group.items[item.item_id] = item
+            self._token_map[token] = (group.subscription_id, item.item_id)
         self._recompute_group_status(runtime)
         return group
 
@@ -409,7 +466,10 @@ class SubscriptionRegistry:
         try:
             await self._backend.unsubscribe(tokens)
         except Exception:
-            logger.debug("unsubscribe during cancel failed", exc_info=True)
+            # Native teardown failed: keep it observable and retryable via the
+            # pending-unsubscribe set instead of swallowing it silently.
+            logger.warning("unsubscribe during cancel failed for %s; will retry", subscription_id, exc_info=True)
+            self._pending_unsubscribes.update(tokens)
         for token in tokens:
             self._token_map.pop(token, None)
         for item in group.items.values():
@@ -446,20 +506,51 @@ class SubscriptionRegistry:
             ]
         )
 
-    def expire_due(self) -> list[str]:
+    async def expire_due(self) -> list[str]:
+        """Expire groups past their TTL, attempting native unsubscribe first.
+
+        Native teardown failures stay observable and retryable via
+        ``_pending_unsubscribes`` instead of being swallowed.
+        """
         now = utc_now()
         expired: list[str] = []
         for subscription_id, runtime in list(self._groups.items()):
             group = runtime.group
             if group.expires_at is not None and now >= group.expires_at and group.status in _ACTIVE_GROUP_STATUSES:
+                tokens = [item.native_token for item in group.items.values()]
+                try:
+                    await self._backend.unsubscribe(tokens)
+                except Exception:
+                    logger.warning(
+                        "unsubscribe during expiry failed for %s; will retry",
+                        subscription_id,
+                        exc_info=True,
+                    )
+                    self._pending_unsubscribes.update(tokens)
                 group.status = SubscriptionGroupStatus.EXPIRED
                 for item in group.items.values():
                     item.status = SubscriptionItemStatus.EXPIRED
-                for token in [item.native_token for item in group.items.values()]:
+                for token in tokens:
                     self._token_map.pop(token, None)
                 self._cursors.invalidate_subscription(subscription_id)
                 expired.append(subscription_id)
         return expired
+
+    async def retry_pending_unsubscribes(self) -> int:
+        """Retry native unsubscribes that previously failed (cancel/expiry)."""
+        if not self._pending_unsubscribes:
+            return 0
+        tokens = list(self._pending_unsubscribes)
+        succeeded = 0
+        for token in tokens:
+            try:
+                await self._backend.unsubscribe([token])
+            except Exception:
+                logger.warning("pending unsubscribe retry failed for token %d", token, exc_info=True)
+                continue
+            self._pending_unsubscribes.discard(token)
+            succeeded += 1
+        return succeeded
 
     async def restore_after_reconnect(self) -> None:
         """Re-establish active groups after session recovery (SPEC §2.6).
@@ -495,4 +586,8 @@ class SubscriptionRegistry:
                 await self._backend.subscribe(items_payload, tokens)
             except Exception:
                 logger.warning("subscription restore failed for %s", group.subscription_id)
+                # Drop the dangling token mappings for the never-established
+                # native feeds (finding E5) so no stale routing remains.
+                for token in tokens:
+                    self._token_map.pop(token, None)
                 group.status = SubscriptionGroupStatus.FAILED

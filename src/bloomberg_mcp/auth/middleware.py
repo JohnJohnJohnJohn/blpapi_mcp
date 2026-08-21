@@ -17,7 +17,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from bloomberg_mcp.auth.principal import Principal
 from bloomberg_mcp.auth.token_verifier import TokenVerifier
-from bloomberg_mcp.errors import ErrorCode
+from bloomberg_mcp.errors import ErrorCode, GatewayError
 from bloomberg_mcp.observability.audit import AuditEvent, AuditLogger
 from bloomberg_mcp.policy.quota import QuotaEngine
 
@@ -82,6 +82,23 @@ class BearerAuthMiddleware:
 
         address = _client_address(scope)
         current_client_address.set(address)
+
+        try:
+            self._quota.admit_auth_attempt(address)
+        except GatewayError:
+            self._audit.record(
+                AuditEvent(action="auth", outcome="rate_limited", client_address=address, error_code="RATE_LIMITED")
+            )
+            await _send_json_error(
+                scope,
+                receive,
+                send,
+                429,
+                ErrorCode.RATE_LIMITED,
+                "Too many authentication attempts; try again later.",
+                www_auth=True,
+            )
+            return
 
         headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
         authorization = headers.get("authorization")

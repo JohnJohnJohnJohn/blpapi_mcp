@@ -28,13 +28,12 @@ from bloomberg_mcp.blp.name_cache import NameCache
 from bloomberg_mcp.blp.request_builder import populate_request
 from bloomberg_mcp.blp.request_executor import read_event_queue
 from bloomberg_mcp.blp.schema_registry import SchemaRegistry
-from bloomberg_mcp.models import ResponseMode
 from bloomberg_mcp.blp.service_registry import ServiceRegistry
 from bloomberg_mcp.blp.session_manager import SessionManager
 from bloomberg_mcp.blp.subscription_dispatcher import SubscriptionDispatcher
 from bloomberg_mcp.config import BloombergConfig, RequestsConfig
 from bloomberg_mcp.errors import ErrorCode, GatewayError
-from bloomberg_mcp.models import CanonicalRequest, OperationDescriptor, SessionState
+from bloomberg_mcp.models import CanonicalRequest, OperationDescriptor, ResponseMode, SessionState
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +45,9 @@ class NativeBloombergBackend(BloombergBackend):
         self,
         bloomberg_config: BloombergConfig,
         requests_config: RequestsConfig,
-        on_entitlement_failure: EntitlementCallback | None = None,
     ) -> None:
         self._config = bloomberg_config
         self._requests = requests_config
-        self._on_entitlement_failure = on_entitlement_failure
         self._name_cache = NameCache()
         self._dispatcher = SubscriptionDispatcher()
         self._session_manager = SessionManager(bloomberg_config, self._dispatcher, self._on_generation_change)
@@ -60,16 +57,32 @@ class NativeBloombergBackend(BloombergBackend):
         self._correlation_ids: dict[int, blpapi.CorrelationId] = {}
         self._token_counter = 0
         self._state_lock = threading.Lock()
+        self._reader_threads: set[threading.Thread] = set()
+        self._stopping = False
 
     # ---------------------------------------------------------------- lifecycle
 
     async def start(self) -> None:
         self._dispatcher.set_loop(asyncio.get_running_loop())
+        # The generation-transition coordinator (finding N5) emits exactly one
+        # schema refresh + listener notification per transition; no duplicate
+        # refresh/notify here (finding N1).
         await self._session_manager.start()
-        await self._refresh_schemas()
-        await self._notify_session_listener()
 
     async def stop(self) -> None:
+        self._stopping = True
+        # Signal reader threads to exit at their next loop iteration and
+        # join them (bounded) so shutdown never leaves request workers running.
+        threads = list(self._reader_threads)
+        deadline = time.monotonic() + 5.0
+        for thread in threads:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
+        with self._state_lock:
+            self._correlation_ids.clear()
+            self._reader_threads.clear()
         await self._session_manager.stop()
         self._services.invalidate_all()
         await self._notify_session_listener()
@@ -186,7 +199,9 @@ class NativeBloombergBackend(BloombergBackend):
             "populating native request %s/%s with parameters: %s", service, operation, sorted(parameter_keys)
         )
 
-    async def submit_request(self, request: CanonicalRequest, external_request_id: str) -> ExecutionHandle:
+    async def submit_request(
+        self, request: CanonicalRequest, external_request_id: str, deadline_seconds: int | None = None
+    ) -> ExecutionHandle:
         await self.require_connected()
         descriptor = self.get_operation(request.service, request.operation)
         if descriptor.schema_hash != request.schema_hash:
@@ -233,8 +248,14 @@ class NativeBloombergBackend(BloombergBackend):
 
         queue: asyncio.Queue[Any] = asyncio.Queue()
         loop = asyncio.get_running_loop()
-        deadline = time.monotonic() + self._requests.maximum_deadline_seconds
-        threading.Thread(
+        # The reader honours the caller's overall deadline, not the global
+        # maximum: an application-level timeout must release the worker at the
+        # caller's bound (SPEC §2.10), capped by the configured maximum.
+        capped_deadline = self._requests.maximum_deadline_seconds
+        if deadline_seconds is not None:
+            capped_deadline = min(max(1, deadline_seconds), capped_deadline)
+        deadline = time.monotonic() + capped_deadline
+        reader = threading.Thread(
             target=read_event_queue,
             args=(
                 event_queue,
@@ -245,12 +266,15 @@ class NativeBloombergBackend(BloombergBackend):
                 self.session_generation,
                 deadline,
                 lambda: self._session_manager.state,
-                self._on_entitlement_failure,
+                lambda: self._stopping,
             ),
             kwargs={"typed": request.response_mode == ResponseMode.TYPED},
             name=f"blp-request-{token}",
             daemon=True,
-        ).start()
+        )
+        reader.start()
+        with self._state_lock:
+            self._reader_threads.add(reader)
         return ExecutionHandle(native_token=token, session_generation=self.session_generation, messages=queue)
 
     async def cancel_request(self, native_token: int) -> None:
@@ -263,6 +287,11 @@ class NativeBloombergBackend(BloombergBackend):
             await asyncio.to_thread(session.cancel, correlation_id)
         except Exception:
             logger.debug("cancel failed for token %d", native_token, exc_info=True)
+
+    async def release_request(self, native_token: int) -> None:
+        """Idempotent lease release: drop the correlation id and bookkeeping."""
+        with self._state_lock:
+            self._correlation_ids.pop(native_token, None)
 
     # ------------------------------------------------------------- subscriptions
 

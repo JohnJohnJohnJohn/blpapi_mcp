@@ -21,12 +21,12 @@ class UsageTracker:
     def request_failed(self, principal_id: str, operation: str) -> None:
         self._metrics.inc("blpapi_request_failures_total", principal=principal_id, operation=operation)
 
-    def entitlement_failure(self) -> None:
-        self._metrics.inc("blpapi_entitlement_failures_total")
-        self._quota.record_entitlement_failure()
+    def entitlement_failure(self, service: str) -> None:
+        self._metrics.inc("blpapi_entitlement_failures_total", service=service)
+        self._quota.record_entitlement_failure(service)
 
-    def entitlement_success(self) -> None:
-        self._quota.record_entitlement_success()
+    def entitlement_success(self, service: str) -> None:
+        self._quota.record_entitlement_success(service)
 
     def snapshot(self) -> dict[str, int | bool]:
         return self._quota.snapshot()

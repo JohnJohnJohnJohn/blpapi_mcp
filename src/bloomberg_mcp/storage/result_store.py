@@ -18,8 +18,6 @@ from bloomberg_mcp.storage.models import ArtifactInfo
 _CONTENT_TYPES = {
     "json": "application/json",
     "jsonl": "application/x-ndjson",
-    "parquet": "application/vnd.apache.parquet",
-    "arrow": "application/vnd.apache.arrow.file",
 }
 
 
