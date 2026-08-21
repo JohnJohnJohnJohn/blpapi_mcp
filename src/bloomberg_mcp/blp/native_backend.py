@@ -175,27 +175,16 @@ class NativeBloombergBackend(BloombergBackend):
     def _log_built_request(
         native_request: blpapi.Request, service: str, operation: str, parameter_keys: Sequence[str]
     ) -> None:
-        """INFO-level dump of the built native request (element -> value count).
+        """INFO-level log of the canonical parameters handed to the native build.
 
-        This is the discriminator for silently-ignored parameters (e.g.
-        overrides): an element that was built appears with its value count;
-        one that never made it into the native request is absent or array[0].
+        blpapi.Request is not a full Element (no numElements), so the native
+        request is not introspectable element-by-element; the parameter-key
+        list is the decisive signal for silently-ignored parameters (e.g.
+        overrides): if a key is listed here the value reached the builder.
         """
         logger.info(
             "populating native request %s/%s with parameters: %s", service, operation, sorted(parameter_keys)
         )
-        try:
-            parts: list[str] = []
-            for index in range(native_request.numElements()):
-                element = native_request.getElement(index)
-                name = element.name().toString()
-                if element.isArray():
-                    parts.append(f"{name}=array[{element.numValues()}]")
-                else:
-                    parts.append(f"{name}=scalar")
-            logger.info("native request %s/%s built: %s", service, operation, ", ".join(parts))
-        except Exception as exc:  # pragma: no cover - observability must never break requests
-            logger.warning("native request %s/%s introspection failed: %s", service, operation, exc)
 
     async def submit_request(self, request: CanonicalRequest, external_request_id: str) -> ExecutionHandle:
         await self.require_connected()
