@@ -126,7 +126,7 @@ class SubscriptionDispatcher:
             last = self._info_at.get(key, 0.0)
             if now - last >= 10.0:
                 self._info_at[key] = now
-                logger.info(
+                logger.debug(
                     "native subscription event %s routed (token=%s, message_type=%s)",
                     kind.value,
                     tokens[0],
