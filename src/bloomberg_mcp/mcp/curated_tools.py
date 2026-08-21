@@ -7,6 +7,7 @@ defaults, stable schemas, normalized output and tighter limits.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from bloomberg_mcp.auth.principal import Principal
@@ -102,13 +103,29 @@ async def get_reference_data(gateway: Gateway, principal: Principal, arguments: 
     return await _run_normalized(gateway, principal, REFDATA, "ReferenceDataRequest", parameters, "get_reference_data")
 
 
+def _normalize_bbg_date(value: Any) -> str:
+    """Normalize a date input to Bloomberg's canonical YYYYMMDD.
+
+    HistoricalDataRequest declares startDate/endDate as plain strings (not
+    DATE elements), and Bloomberg's historical server parses only YYYYMMDD;
+    an ISO "YYYY-MM-DD" string is rejected with INVALID_START_DATE. The
+    curated tool advertises both formats, so both must work.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text.replace("-", "")
+    return text
+
+
 async def get_historical_data(gateway: Gateway, principal: Principal, arguments: dict[str, Any]) -> dict[str, Any]:
     security = _str_list(arguments, "security", maximum=1)[0]
     parameters: dict[str, Any] = {
         "securities": [security],
         "fields": _str_list(arguments, "fields", maximum=25),
-        "startDate": arguments.get("start_date"),
-        "endDate": arguments.get("end_date"),
+        "startDate": _normalize_bbg_date(arguments.get("start_date")),
+        "endDate": _normalize_bbg_date(arguments.get("end_date")),
         "periodicitySelection": str(arguments.get("periodicity", "DAILY")).upper(),
     }
     overrides = _overrides(arguments)
