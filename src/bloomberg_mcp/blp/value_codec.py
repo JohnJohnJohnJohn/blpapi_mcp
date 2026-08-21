@@ -117,7 +117,7 @@ def encode_value(value: Any, datatype: BloombergDatatype, *, typed: bool) -> Any
         return number
 
     if datatype in (BloombergDatatype.INT32, BloombergDatatype.INT64,
-                    BloombergDatatype.BYTE, BloombergDatatype.CHAR):
+                    BloombergDatatype.BYTE):
         number = int(value)
         if JSON_SAFE_INT_MIN <= number <= JSON_SAFE_INT_MAX:
             return number
@@ -131,8 +131,8 @@ def encode_value(value: Any, datatype: BloombergDatatype, *, typed: bool) -> Any
         encoded = base64.b64encode(data).decode("ascii")
         return {"$blp_type": "BYTEARRAY", "value": encoded}
 
-    # STRING, ENUMERATION, CHOICE names, CORRELATION_ID and unsupported types
-    # fall back to text; Bloomberg text is untrusted content downstream.
+    # STRING, CHAR, ENUMERATION, CHOICE names, CORRELATION_ID and unsupported
+    # types fall back to text; Bloomberg text is untrusted content downstream.
     text = value if isinstance(value, str) else str(value)
     if typed:
         return {"$blp_type": datatype.value, "value": text}

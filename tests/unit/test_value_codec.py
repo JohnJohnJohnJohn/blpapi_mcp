@@ -117,3 +117,11 @@ def test_char_single_character() -> None:
     assert decode_input_value("A", D.CHAR) == "A"
     with pytest.raises(GatewayError):
         decode_input_value("AB", D.CHAR)
+
+
+def test_char_flag_not_int_converted() -> None:
+    # HAS_NEWS_TODAY is a CHAR Y/N flag; int('Y') previously crashed the
+    # whole response ("Request stream failed", event_count 0).
+    assert encode_value("Y", D.CHAR, typed=False) == "Y"
+    assert encode_value("N", D.CHAR, typed=False) == "N"
+    assert encode_value("Y", D.CHAR, typed=True) == {"$blp_type": "CHAR", "value": "Y"}
