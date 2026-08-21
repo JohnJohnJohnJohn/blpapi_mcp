@@ -46,6 +46,10 @@ class FakeElement:
             self._members[key] = member
         return member
 
+    def setElement(self, name: str | object, value: object) -> None:
+        member = self.getElement(name)
+        member.value = value
+
 
 class FakeRequest(FakeElement):
     pass

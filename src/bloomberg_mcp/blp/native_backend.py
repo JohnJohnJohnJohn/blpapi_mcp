@@ -202,7 +202,10 @@ class NativeBloombergBackend(BloombergBackend):
         with self._state_lock:
             self._token_counter += 1
             token = self._token_counter
-            correlation_id = blpapi.CorrelationId(value=token)
+            # NB: blpapi.CorrelationId ignores keyword args entirely
+            # (CorrelationId(value=n) yields an EMPTY id: type=UNSET, value=None),
+            # so the token must be passed positionally.
+            correlation_id = blpapi.CorrelationId(token)
             self._correlation_ids[token] = correlation_id
 
         if descriptor.request is None:
@@ -269,7 +272,10 @@ class NativeBloombergBackend(BloombergBackend):
         subscription_list = blpapi.SubscriptionList()
         with self._state_lock:
             for item, token in zip(items, native_tokens, strict=True):
-                correlation_id = blpapi.CorrelationId(value=token)
+                # Positional token: CorrelationId(value=n) silently yields an
+                # empty id (blpapi ignores kwargs), which made blpapi auto-assign
+                # its own correlation id and broke event-to-item routing.
+                correlation_id = blpapi.CorrelationId(token)
                 self._correlation_ids[token] = correlation_id
                 fields = list(item.get("fields") or [])
                 options = dict(item.get("options") or {})

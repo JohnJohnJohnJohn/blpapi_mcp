@@ -95,4 +95,16 @@ def _set_members(
         child = children.get(key)
         if child is None:
             raise GatewayError(ErrorCode.UNKNOWN_ELEMENT, f"Unknown element {key!r} during native build.")
-        _set_element(element.getElement(name_cache.get(child.name)), child, value, name_cache)
+        if value is None:
+            continue
+        if child.datatype in (BloombergDatatype.SEQUENCE, BloombergDatatype.CHOICE):
+            _set_element(element.getElement(name_cache.get(child.name)), child, value, name_cache)
+        elif child.max_values != 1:
+            repeated = element.getElement(name_cache.get(child.name))
+            for item in value if isinstance(value, list) else [value]:
+                repeated.appendValue(item)
+        else:
+            # Canonical blpapi pattern (matches Bloomberg's own examples): set the
+            # member directly on the parent. getElement(name).setValue() on members
+            # of an appended sequence can silently no-op on some blpapi versions.
+            element.setElement(name_cache.get(child.name), value)
