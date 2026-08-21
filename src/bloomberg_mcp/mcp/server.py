@@ -30,6 +30,7 @@ from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from bloomberg_mcp import PROTOCOL_REVISION, __version__
+from bloomberg_mcp.commit import COMMIT
 from bloomberg_mcp.auth.middleware import BearerAuthMiddleware, current_principal
 from bloomberg_mcp.auth.token_verifier import TokenVerifier
 from bloomberg_mcp.errors import ErrorCode, GatewayError
@@ -342,6 +343,7 @@ def build_app(gateway: Gateway, verifier: TokenVerifier) -> Starlette:
         return JSONResponse(
             {
                 "gateway": __version__,
+                "commit": COMMIT,
                 "protocol_revision": PROTOCOL_REVISION,
                 "mcp_sdk": _safe_version(_pkg_version, "mcp"),
                 "blpapi": _safe_version(_pkg_version, "blpapi"),

@@ -255,7 +255,12 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="blpapi_validate_request",
         title="Validate a Bloomberg request",
-        description="Validate request parameters against the live Bloomberg schema without submitting.",
+        description=(
+            "Validate request parameters against the live Bloomberg schema without submitting. "
+            "Note: the native schema declares array elements such as 'securities'/'fields' with "
+            "min_values=0, so omitting them still validates true (schema-faithful). "
+            "Pass options.strict_types=true to reject scalar-where-array-was-declared inputs."
+        ),
         input_schema={
             "type": "object",
             "properties": {

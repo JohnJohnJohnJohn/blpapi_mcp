@@ -279,7 +279,13 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="get_reference_data",
         title="Reference data",
-        description="Fetch reference (static) field data for securities. Normalized tabular output.",
+        description=(
+            "Fetch reference (static) field data for securities. Normalized tabular output. "
+            "Note: overrides (e.g. CURRENCY) are forwarded to Bloomberg verbatim; "
+            "currency-converted values require the Bloomberg FX-conversion entitlement — "
+            "if a CURRENCY override returns unconverted values, use the generic "
+            "HistoricalDataRequest with its native 'currency' element instead."
+        ),
         input_schema=_schema(
             {"securities": _STRING_ARRAY, "fields": _STRING_ARRAY, "overrides": _OVERRIDES_SCHEMA},
             ["securities", "fields"],
@@ -291,7 +297,12 @@ TOOLS: list[ToolSpec] = [
     ToolSpec(
         name="get_historical_data",
         title="Historical data",
-        description="Fetch historical field data for one security over a date range.",
+        description=(
+            "Fetch historical field data for one security over a date range. "
+            "Dates accept YYYY-MM-DD or YYYYMMDD; Bloomberg stores them as strings (YYYYMMDD). "
+            "For currency-converted series use the generic HistoricalDataRequest with its "
+            "native 'currency' element (the CURRENCY override requires FX entitlement)."
+        ),
         input_schema=_schema(
             {
                 "security": {"type": "string"},

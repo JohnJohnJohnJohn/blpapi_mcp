@@ -24,6 +24,15 @@ if (-not (Test-Path $Python)) {
     exit 1
 }
 
+# Expose the exact deployed commit via the /version endpoint (best effort).
+$env:BLOOMBERG_MCP_COMMIT = $null
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $commit = git -C $RepoRoot rev-parse HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $commit) {
+        $env:BLOOMBERG_MCP_COMMIT = $commit.Trim()
+    }
+}
+
 # Secrets are read from the environment / credential manager — never passed
 # on the command line (SPEC §4.13).
 $arguments = @("-m", "bloomberg_mcp.main")
